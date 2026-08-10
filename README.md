@@ -1,11 +1,34 @@
-<div align="center">
+# 🇨🇴 López & Gracia - Sistema Integrado de Conciliación de Caja, Auditoría POS y Nómina
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+Sistema web integral de conciliación de caja, auditoría de reportes POS mediante Inteligencia Artificial (Google Gemini AI), control multitienda y liquidación de nómina según la legislación laboral de Colombia.
 
-  <h1>Built with AI Studio</h2>
+## 📘 Documentación Completa
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+Hemos preparado un documento de especificación y arquitectura detallado para usuarios **Técnicos 🔧** y **No Técnicos 👤**:
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+👉 **[Ver Documentación Completa del Producto (DOCUMENTACION.md)](./DOCUMENTACION.md)**
 
-</div>
+---
+
+## 🛠️ Tecnologías Principales
+
+- **Frontend**: React 19, TypeScript, Tailwind CSS v4, Lucide Icons, Motion.
+- **Backend / API**: Node.js, Express, esbuild, tsx.
+- **Inteligencia Artificial**: Google Gemini API (`@google/genai`) para OCR y análisis de reportes POS/PDF.
+- **Persistencia**: Google Cloud Firestore (Firebase) con estrategia Offline-First (IndexedDB / LocalStorage).
+- **Reportabilidad**: jsPDF (exportación a PDF) y SheetJS/XLSX (exportación a Excel).
+
+---
+
+## 🚀 Comandos de Ejecución
+
+```bash
+# Servidor de Desarrollo (Puerto 3000)
+npm run dev
+
+# Compilación para Producción
+npm run build
+
+# Iniciar servidor de Producción
+npm start
+```
