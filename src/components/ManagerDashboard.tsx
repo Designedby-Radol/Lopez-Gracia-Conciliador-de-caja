@@ -33,6 +33,7 @@ import {
   Bell,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   Sliders,
   Save,
   Lock,
@@ -42,7 +43,18 @@ import {
   Shield,
   Edit,
   Calculator,
-  AlertCircle
+  AlertCircle,
+  Package,
+  ClipboardCheck,
+  Search,
+  Filter,
+  ArrowUpRight,
+  ArrowDownRight,
+  CreditCard,
+  Wallet,
+  Store,
+  Coffee,
+  Check
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import * as pdfjsLib from "pdfjs-dist";
@@ -52,6 +64,9 @@ import { dbAdapter } from "../db/dbAdapter";
 import { CierreCaja, UserRole } from "../types";
 import Logo from "./Logo";
 import PDFUploader from "./PDFUploader";
+import InventoryClosure from "./InventoryClosure";
+import OperationalChecklist from "./OperationalChecklist";
+import IndicadoresDashboard from "./IndicadoresDashboard";
 import SalariesManager, {
   BonusConfig,
   DailySchedule,
@@ -73,9 +88,9 @@ export const ROLE_POINTS_MAP: Record<string, number> = {
   "Lider operador": 2.0,
   "Líder de pastelería": 1.5,
   "Lider de pasteleria": 1.5,
-  "Auxiliar de pastelería": 0.5,
-  "Auxiliar de pasteleria": 0.5,
-  "Asistente de pasteleria": 0.5,
+  "Auxiliar de pastelería": 0.8,
+  "Auxiliar de pasteleria": 0.8,
+  "Asistente de pasteleria": 0.8,
   "Asistente de Servicio": 1.3,
   "Asistente de servicio": 1.3,
   "Asistente de servicio tiempo completo (TC)": 1.3,
@@ -93,10 +108,10 @@ export const getRolePoints = (roleName: string): number => {
 
   const lower = clean.toLowerCase();
   if (lower.includes("gerente")) return 0.0;
-  if (lower.includes("lider de punto") || lower.includes("líder de punto") || lower.includes("operador")) return 2.0;
+  if (lower.includes("lider de punto") || lower.includes("líder de punto") || lower.includes("operador") || (lower.includes("lider") && !lower.includes("pasteler")) || (lower.includes("líder") && !lower.includes("pasteler"))) return 2.0;
   if (lower.includes("pasteler")) {
     if (lower.includes("líder") || lower.includes("lider")) return 1.5;
-    return 0.5;
+    return 0.8;
   }
   if (lower.includes("asistente") || lower.includes("aux")) {
     if (lower.includes("medio") || lower.includes("mt")) return 1.0;
@@ -113,7 +128,7 @@ interface ManagerDashboardProps {
 
 export default function ManagerDashboard({ onLogout, username, local = "Chapinero" }: ManagerDashboardProps) {
   const [cierres, setCierres] = useState<CierreCaja[]>([]);
-  const [activeTab, setActiveTab] = useState<"metrics" | "audit" | "history" | "propinas" | "team" | "salarios">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "indicadores" | "audit" | "inventory" | "checklist" | "history" | "propinas" | "team" | "salarios">("metrics");
   const [auditSubTab, setAuditSubTab] = useState<"pending" | "history">("pending");
   const [selectedCierreId, setSelectedCierreId] = useState<string | null>(null);
   const [posData, setPosData] = useState<{
@@ -313,73 +328,36 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
   // Estado para confirmación de eliminación
   const [deletingMemberName, setDeletingMemberName] = useState<string | null>(null);
-  const [isLoadingTeam, setIsLoadingTeam] = useState(false);
 
-  // Cargar equipo de Supabase (con fallback a localStorage) al iniciar y sincronizar
-  const loadTeamMembers = async () => {
-    setIsLoadingTeam(true);
-    try {
-      const dbUsers = await dbAdapter.getUsuarios();
-
-      const localRegistryData = localStorage.getItem("lopez_gracia_user_registry");
-      let localMembers: any[] = [];
-      if (localRegistryData) {
-        try {
-          localMembers = JSON.parse(localRegistryData);
-        } catch (e) {
-          localMembers = [];
-        }
+  // Cargar equipo de localStorage al iniciar y sincronizar
+  const loadTeamMembers = () => {
+    const data = localStorage.getItem("lopez_gracia_user_registry");
+    let members = [];
+    if (data) {
+      try {
+        members = JSON.parse(data);
+      } catch (e) {
+        members = [];
       }
-
-      const localMap = new Map<string, any>(
-        localMembers.map((m: any) => [m.nombre.toLowerCase(), m])
-      );
-
-      // Combinar usuarios de la base de datos con configuraciones locales
-      const merged = dbUsers.map((u: any) => {
-        const localInfo = localMap.get(u.nombre.toLowerCase()) || {};
-        const role = u.role || localInfo.role || "Asistente de Servicio";
-        const pts = getRolePoints(role);
-        return {
-          id: u.id,
-          nombre: u.nombre,
-          cedula: u.cedula || localInfo.cedula || "",
-          password: localInfo.password || "tienda",
-          role: role,
-          local: u.local || localInfo.local || "Chapinero",
-          localId: u.localId,
-          puntosPropinas: pts,
-          aptoPropinas: typeof localInfo.aptoPropinas === "boolean" ? localInfo.aptoPropinas : (role !== "gerente" && role !== "Admin"),
-          activo: typeof localInfo.activo === "boolean" ? localInfo.activo : true
-        };
-      });
-
-      // Incluir también usuarios en localStorage que aún no estén en Supabase
-      for (const locUser of localMembers) {
-        if (!merged.some(m => m.nombre.toLowerCase() === locUser.nombre.toLowerCase())) {
-          const role = locUser.role || "Asistente de Servicio";
-          merged.push({
-            id: locUser.id,
-            nombre: locUser.nombre,
-            cedula: locUser.cedula || "",
-            password: locUser.password || "tienda",
-            role: role,
-            local: locUser.local || "Chapinero",
-            localId: locUser.localId,
-            puntosPropinas: getRolePoints(role),
-            aptoPropinas: typeof locUser.aptoPropinas === "boolean" ? locUser.aptoPropinas : (role !== "gerente" && role !== "Admin"),
-            activo: typeof locUser.activo === "boolean" ? locUser.activo : true
-          });
-        }
-      }
-
-      setTeamMembers(merged);
-      localStorage.setItem("lopez_gracia_user_registry", JSON.stringify(merged));
-    } catch (err) {
-      console.error("Error al cargar equipo desde Supabase:", err);
-    } finally {
-      setIsLoadingTeam(false);
     }
+    
+    // Normalizar con valores por defecto para propinas si no los tienen
+    const normalized = members.map((m: any) => {
+      const role = m.role || "Asistente de Servicio";
+      const pts = getRolePoints(role);
+      return {
+        nombre: m.nombre,
+        cedula: m.cedula || "",
+        password: m.password || "tienda",
+        role: role,
+        local: m.local || "Chapinero",
+        puntosPropinas: pts,
+        aptoPropinas: typeof m.aptoPropinas === "boolean" ? m.aptoPropinas : (m.role !== "gerente"),
+        activo: typeof m.activo === "boolean" ? m.activo : true
+      };
+    });
+    
+    setTeamMembers(normalized);
   };
 
   useEffect(() => {
@@ -391,21 +369,8 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     localStorage.setItem("lopez_gracia_user_registry", JSON.stringify(updated));
   };
 
-  const handleDeleteTeamMember = async (memberName: string) => {
-    const memberToDelete = teamMembers.find(m => m.nombre.toLowerCase() === memberName.toLowerCase());
-
-    try {
-      if (memberToDelete?.id) {
-        await dbAdapter.deleteUsuario(memberToDelete.id, memberName);
-      } else {
-        await dbAdapter.deleteUsuario(undefined, memberName);
-      }
-    } catch (err: any) {
-      console.error("Error al eliminar colaborador de Supabase:", err);
-      alert(err?.message || "Error al eliminar usuario de la base de datos.");
-    }
-
-    const updated = teamMembers.filter(m => m.nombre.toLowerCase() !== memberName.toLowerCase());
+  const handleDeleteTeamMember = (memberName: string) => {
+    const updated = teamMembers.filter(m => m.nombre !== memberName);
     saveTeamMembers(updated);
 
     try {
@@ -457,9 +422,9 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     const nameLower = name.toLowerCase();
     const isLider = nameLower.includes("lider") || nameLower.includes("jefe");
     const isPasteleria = nameLower.includes("pasteleria") || nameLower.includes("pastelera");
-    let fallbackRole = "Asistente de servicio";
-    if (isLider) fallbackRole = "Lider de punto";
-    else if (isPasteleria) fallbackRole = "Asistente de pasteleria";
+    let fallbackRole = "Asistente de Servicio";
+    if (isLider) fallbackRole = "Líder operador";
+    else if (isPasteleria) fallbackRole = "Auxiliar de pastelería";
 
     return {
       puntos: ROLE_POINTS_MAP[fallbackRole] !== undefined ? ROLE_POINTS_MAP[fallbackRole] : 1.0,
@@ -815,9 +780,8 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
       await dbAdapter.deleteCierre(id);
       setDeletingId(null);
       await loadCierres();
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error al eliminar cierre de caja:", err);
-      alert(err?.message || "Error al eliminar el cierre de caja.");
     }
   };
 
@@ -1080,6 +1044,69 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
   const avgPropinas = filteredMetricsCierres.length > 0 
     ? Math.round(totalPropinas / filteredMetricsCierres.length) 
     : 0;
+
+  // Estados interactivos para el nuevo Dashboard
+  const [globalSearchQuery, setGlobalSearchQuery] = useState("");
+  const [overviewPeriod, setOverviewPeriod] = useState<"mensual" | "semanal" | "diario">("mensual");
+  const [selectedWeekdayIndex, setSelectedWeekdayIndex] = useState<number | null>(5); // Default Sábado
+  const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
+
+  // Cálculos de Ventas por Día de la Semana (Lunes a Domingo)
+  const salesByWeekday = useMemo(() => {
+    const dayNames = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+    const dayTotals = [0, 0, 0, 0, 0, 0, 0];
+    const dayCounts = [0, 0, 0, 0, 0, 0, 0];
+
+    filteredMetricsCierres.forEach(c => {
+      const d = new Date(c.fecha + "T12:00:00");
+      const dayIndex = d.getDay(); // 0: Dom, 1: Lun, ..., 6: Sáb
+      const totalC = (c.efectivoCierre || 0) + (c.datafonoCierre || 0) + (c.justoCierre || 0) + (c.rappiCierre || 0) + (c.transferenciasCierre || 0);
+      dayTotals[dayIndex] += totalC;
+      dayCounts[dayIndex] += 1;
+    });
+
+    // Reordenar a formato Lunes a Domingo (1 a 6, luego 0)
+    const orderedIndices = [1, 2, 3, 4, 5, 6, 0];
+    const result = orderedIndices.map(idx => {
+      const total = dayTotals[idx];
+      const avg = dayCounts[idx] > 0 ? Math.round(total / dayCounts[idx]) : 0;
+      return {
+        dayIndex: idx,
+        name: dayNames[idx],
+        total: total,
+        avg: avg,
+        count: dayCounts[idx]
+      };
+    });
+
+    const maxVal = Math.max(...result.map(d => d.total), 1);
+    return result.map(d => ({
+      ...d,
+      pct: Math.round((d.total / maxVal) * 100),
+      isPeak: d.total === maxVal && d.total > 0
+    }));
+  }, [filteredMetricsCierres]);
+
+  // Día de mayor venta
+  const peakWeekday = useMemo(() => {
+    const peak = salesByWeekday.reduce((max, curr) => curr.total > max.total ? curr : max, salesByWeekday[0]);
+    return peak;
+  }, [salesByWeekday]);
+
+  // Cierres recientes filtrados por búsqueda global
+  const recentClosuresFiltered = useMemo(() => {
+    let list = [...cierres].sort((a, b) => new Date(b.createdAt || b.fecha).getTime() - new Date(a.createdAt || a.fecha).getTime());
+    if (globalSearchQuery.trim()) {
+      const q = globalSearchQuery.toLowerCase().trim();
+      list = list.filter(c => 
+        c.fecha.toLowerCase().includes(q) ||
+        (c.colaboradorNombre && c.colaboradorNombre.toLowerCase().includes(q)) ||
+        (c.liderNombre && c.liderNombre.toLowerCase().includes(q)) ||
+        c.estado.toLowerCase().includes(q)
+      );
+    }
+    return list.slice(0, 7);
+  }, [cierres, globalSearchQuery]);
 
   // Formateadores de Moneda COP
   const formatCOP = (num: number) => {
@@ -1579,576 +1606,928 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F2EB] text-[#1C2E24] flex flex-col md:flex-row relative selection:bg-brand-accent/10">
-      {/* Dynamic technical clean line pattern - modern soft version */}
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#e4e4e7_1px,transparent_1px),linear-gradient(to_bottom,#e4e4e7_1px,transparent_1px)] bg-[size:4rem_4rem] opacity-10 pointer-events-none z-0" />
-
-      {/* SIDEBAR - Left Side (Hidden on Mobile) */}
-      <aside className="hidden md:flex flex-col w-72 bg-white border-r border-[#1C2E24]/10 h-screen sticky top-0 z-30 flex-shrink-0">
-        {/* Sidebar Logo */}
-        <div className="p-6 pb-4 border-b border-[#1C2E24]/5">
-          <Logo size="md" className="text-[#1C2E24]" />
-          <div className="flex items-center space-x-2.5 mt-4 px-1">
-            <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#1C2E24]/60">Sede Chapinero</span>
+    <div className="min-h-screen bg-[#F8F9FA] text-[#1C2E24] flex flex-col md:flex-row relative selection:bg-[#1E3E30]/10 font-sans">
+      {/* SIDEBAR - Left Side (Desktop) */}
+      <aside className="hidden md:flex flex-col w-64 bg-white border-r border-slate-200/80 h-screen sticky top-0 z-30 flex-shrink-0 select-none">
+        {/* Brand Header */}
+        <div className="p-5 pb-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="px-2.5 py-1.5 rounded-xl bg-[#1E3E30] flex items-center justify-center text-white shadow-xs">
+              <Logo size="sm" className="text-white h-6 w-auto" />
+            </div>
+            <div>
+              <div className="text-sm font-black tracking-tight text-[#1C2E24] leading-none">López & Gracia</div>
+              <div className="text-[10px] font-bold text-[#1C2E24]/50 tracking-wider uppercase mt-1 flex items-center space-x-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Chapinero POS</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Sidebar Navigation */}
-        <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto">
-          {/* Dashboard Item */}
-          <button
-            onClick={() => { setActiveTab("metrics"); setSelectedCierreId(null); }}
-            className={`w-full flex items-center space-x-3.5 px-4 py-3 text-xs font-black uppercase tracking-wider transition-all duration-150 cursor-pointer ${
-              activeTab === "metrics" ? "bg-zinc-50 text-[#1C2E24]/70 rounded-xl" : "text-[#1C2E24]/60 hover:bg-[#F5F2EB]/50 rounded-xl"
-            }`}
-          >
-            <LayoutDashboard className="w-5 h-5 opacity-80" />
-            <span>Dashboard</span>
-          </button>
-
-          {/* Métricas Item (Active in mockup) */}
-          <button
-            onClick={() => { setActiveTab("metrics"); setSelectedCierreId(null); }}
-            className={`w-full flex items-center space-x-3.5 px-4 py-3 text-xs font-black uppercase tracking-wider transition-all duration-150 cursor-pointer ${
-              activeTab === "metrics" ? "bg-[#1E3E30] text-white rounded-xl shadow-md shadow-[#1E3E30]/10" : "text-[#1C2E24]/60 hover:bg-[#F5F2EB]/50 rounded-xl"
-            }`}
-          >
-            <TrendingUp className="w-5 h-5" />
-            <span>Métricas</span>
-          </button>
-
-          {/* Auditoría Cierres Item */}
-          <button
-            onClick={() => { setActiveTab("audit"); }}
-            className={`w-full flex items-center justify-between px-4 py-3 text-xs font-black uppercase tracking-wider transition-all duration-150 cursor-pointer ${
-              activeTab === "audit" ? "bg-[#1E3E30] text-white rounded-xl shadow-md shadow-[#1E3E30]/10" : "text-[#1C2E24]/60 hover:bg-[#F5F2EB]/50 rounded-xl"
-            }`}
-          >
-            <div className="flex items-center space-x-3.5">
-              <CheckCircle className="w-5 h-5" />
-              <span>AUDITORÍA CIERRES</span>
+        {/* Sidebar Navigation - Organized by Sections */}
+        <div className="flex-1 px-3 py-4 space-y-6 overflow-y-auto">
+          {/* Section: GENERAL */}
+          <div className="space-y-1">
+            <div className="px-3 text-[10px] font-black uppercase tracking-[0.14em] text-[#1C2E24]/40 mb-2">
+              General
             </div>
-            {pendingCierres.length > 0 && (
-              <span className="bg-[#FF5C35] text-white font-sans text-[10px] font-black px-2 py-0.5 rounded-full">
-                {pendingCierres.length}
+            
+            {/* Dashboard */}
+            <button
+              onClick={() => { setActiveTab("metrics"); setSelectedCierreId(null); }}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "metrics"
+                  ? "bg-[#1E3E30] text-white shadow-xs"
+                  : "text-[#1C2E24]/70 hover:bg-slate-50 hover:text-[#1C2E24]"
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <LayoutDashboard className={`w-4 h-4 ${activeTab === "metrics" ? "text-white" : "text-[#1C2E24]/60"}`} />
+                <span>Dashboard</span>
+              </div>
+            </button>
+
+            {/* Indicadores */}
+            <button
+              onClick={() => { setActiveTab("indicadores"); setSelectedCierreId(null); }}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "indicadores"
+                  ? "bg-[#1E3E30] text-white shadow-xs"
+                  : "text-[#1C2E24]/70 hover:bg-slate-50 hover:text-[#1C2E24]"
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <TrendingUp className={`w-4 h-4 ${activeTab === "indicadores" ? "text-white" : "text-[#1C2E24]/60"}`} />
+                <span>Indicadores</span>
+              </div>
+              <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md ${
+                activeTab === "indicadores" 
+                  ? "bg-white/20 text-white" 
+                  : "bg-emerald-100 text-emerald-800"
+              }`}>
+                KPIs
               </span>
-            )}
-          </button>
+            </button>
 
-          {/* Propinas Item */}
+            {/* Auditoría Cierres */}
+            <button
+              onClick={() => { 
+                setActiveTab("audit"); 
+                setSelectedCierreId(null);
+              }}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "audit"
+                  ? "bg-[#1E3E30] text-white shadow-xs"
+                  : "text-[#1C2E24]/70 hover:bg-slate-50 hover:text-[#1C2E24]"
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <CheckCircle className={`w-4 h-4 ${activeTab === "audit" ? "text-white" : "text-[#1C2E24]/60"}`} />
+                <span>Auditoría Cierres</span>
+              </div>
+              {pendingCierres.length > 0 && (
+                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                  activeTab === "audit"
+                    ? "bg-[#FF5C35] text-white" 
+                    : "bg-[#FF5C35]/15 text-[#FF5C35]"
+                }`}>
+                  {pendingCierres.length}
+                </span>
+              )}
+            </button>
+
+            {/* Liquidación Propinas */}
+            <button
+              onClick={() => { setActiveTab("propinas"); setSelectedCierreId(null); }}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "propinas"
+                  ? "bg-[#1E3E30] text-white shadow-xs"
+                  : "text-[#1C2E24]/70 hover:bg-slate-50 hover:text-[#1C2E24]"
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <Gift className={`w-4 h-4 ${activeTab === "propinas" ? "text-white" : "text-[#1C2E24]/60"}`} />
+                <span>Liquidación Propinas</span>
+              </div>
+            </button>
+          </div>
+
+          {/* Section: HERRAMIENTAS */}
+          <div className="space-y-1">
+            <div className="px-3 text-[10px] font-black uppercase tracking-[0.14em] text-[#1C2E24]/40 mb-2">
+              Herramientas
+            </div>
+
+            {/* Cierre Inventario */}
+            <button
+              onClick={() => { setActiveTab("inventory"); setSelectedCierreId(null); }}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "inventory"
+                  ? "bg-[#1E3E30] text-white shadow-xs"
+                  : "text-[#1C2E24]/70 hover:bg-slate-50 hover:text-[#1C2E24]"
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <Package className={`w-4 h-4 ${activeTab === "inventory" ? "text-white" : "text-[#1C2E24]/60"}`} />
+                <span>Cierre Inventario</span>
+              </div>
+            </button>
+
+            {/* Checklist Operativo */}
+            <button
+              onClick={() => { setActiveTab("checklist"); setSelectedCierreId(null); }}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "checklist"
+                  ? "bg-[#1E3E30] text-white shadow-xs"
+                  : "text-[#1C2E24]/70 hover:bg-slate-50 hover:text-[#1C2E24]"
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <ClipboardCheck className={`w-4 h-4 ${activeTab === "checklist" ? "text-white" : "text-[#1C2E24]/60"}`} />
+                <span>Checklist Operativo</span>
+              </div>
+            </button>
+
+            {/* Gestión Equipo */}
+            <button
+              onClick={() => { setActiveTab("team"); setSelectedCierreId(null); }}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "team"
+                  ? "bg-[#1E3E30] text-white shadow-xs"
+                  : "text-[#1C2E24]/70 hover:bg-slate-50 hover:text-[#1C2E24]"
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <Users className={`w-4 h-4 ${activeTab === "team" ? "text-white" : "text-[#1C2E24]/60"}`} />
+                <span>Gestión Equipo</span>
+              </div>
+              <span className="text-[10px] font-bold text-[#1C2E24]/40 font-mono">
+                {teamMembers.length}
+              </span>
+            </button>
+
+            {/* Nómina & Salarios */}
+            <button
+              onClick={() => { setActiveTab("salarios"); setSelectedCierreId(null); }}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "salarios"
+                  ? "bg-[#1E3E30] text-white shadow-xs"
+                  : "text-[#1C2E24]/70 hover:bg-slate-50 hover:text-[#1C2E24]"
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <DollarSign className={`w-4 h-4 ${activeTab === "salarios" ? "text-white" : "text-[#1C2E24]/60"}`} />
+                <span>Nómina & Salarios</span>
+              </div>
+              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-purple-100 text-purple-700">
+                Beta
+              </span>
+            </button>
+          </div>
+
+          {/* Section: SOPORTE */}
+          <div className="space-y-1">
+            <div className="px-3 text-[10px] font-black uppercase tracking-[0.14em] text-[#1C2E24]/40 mb-2">
+              Soporte
+            </div>
+
+            <button
+              onClick={() => alert("Ajustes del Punto de Venta: Chapinero, Bogotá D.C.\nPermisos: Administrador")}
+              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-bold text-[#1C2E24]/70 hover:bg-slate-50 hover:text-[#1C2E24] transition-all cursor-pointer"
+            >
+              <Settings className="w-4 h-4 text-[#1C2E24]/60" />
+              <span>Configuración</span>
+            </button>
+
+            <button
+              onClick={() => alert("Seguridad y Control de Acceso: Base de datos local cifrada.")}
+              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-bold text-[#1C2E24]/70 hover:bg-slate-50 hover:text-[#1C2E24] transition-all cursor-pointer"
+            >
+              <Shield className="w-4 h-4 text-[#1C2E24]/60" />
+              <span>Seguridad & Roles</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Sidebar Bottom Team Switcher & Actions */}
+        <div className="p-3 border-t border-slate-100 space-y-2">
+          {/* Store Pill */}
+          <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-200/60">
+            <div className="flex items-center space-x-2.5">
+              <div className="w-7 h-7 rounded-lg bg-[#1E3E30] flex items-center justify-center text-white text-xs font-black">
+                <Coffee className="w-3.5 h-3.5" />
+              </div>
+              <div className="text-left">
+                <div className="text-xs font-black text-[#1C2E24] leading-tight">Sede Chapinero</div>
+                <div className="text-[10px] font-bold text-[#1C2E24]/50 leading-tight">Bogotá, D.C.</div>
+              </div>
+            </div>
+            <ChevronDown className="w-4 h-4 text-[#1C2E24]/40" />
+          </div>
+
+          {/* New Closure Quick Action */}
           <button
-            onClick={() => { setActiveTab("propinas"); setSelectedCierreId(null); }}
-            className={`w-full flex items-center space-x-3.5 px-4 py-3 text-xs font-black uppercase tracking-wider transition-all duration-150 cursor-pointer ${
-              activeTab === "propinas" ? "bg-[#1E3E30] text-white rounded-xl shadow-md shadow-[#1E3E30]/10" : "text-[#1C2E24]/60 hover:bg-[#F5F2EB]/50 rounded-xl"
-            }`}
+            onClick={() => { setActiveTab("audit"); setAuditSubTab("pending"); }}
+            className="w-full bg-[#FF5C35] hover:bg-[#E54B24] text-white py-2.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-2 shadow-xs transition-all cursor-pointer"
           >
-            <Gift className="w-5 h-5" />
-            <span>Liquidación Propinas</span>
+            <Plus className="w-4 h-4 stroke-[3]" />
+            <span>Auditar Cierre</span>
           </button>
 
-          {/* Gestión Equipo Item */}
-          <button
-            onClick={() => { setActiveTab("team"); setSelectedCierreId(null); }}
-            className={`w-full flex items-center space-x-3.5 px-4 py-3 text-xs font-black uppercase tracking-wider transition-all duration-150 cursor-pointer ${
-              activeTab === "team" ? "bg-[#1E3E30] text-white rounded-xl shadow-md shadow-[#1E3E30]/10" : "text-[#1C2E24]/60 hover:bg-[#F5F2EB]/50 rounded-xl"
-            }`}
-          >
-            <Users className="w-5 h-5" />
-            <span>Gestión Equipo</span>
-          </button>
-
-          {/* Salarios Item */}
-          <button
-            onClick={() => { setActiveTab("salarios"); setSelectedCierreId(null); }}
-            className={`w-full flex items-center space-x-3.5 px-4 py-3 text-xs font-black uppercase tracking-wider transition-all duration-150 cursor-pointer ${
-              activeTab === "salarios" ? "bg-[#1E3E30] text-white rounded-xl shadow-md shadow-[#1E3E30]/10" : "text-[#1C2E24]/60 hover:bg-[#F5F2EB]/50 rounded-xl"
-            }`}
-          >
-            <DollarSign className="w-5 h-5" />
-            <span>Salarios</span>
-          </button>
-
-          {/* Configuración Dummy Item to match mockup */}
-          <button
-            onClick={() => alert("Módulo de Configuración: Ajustes de sucursal, permisos de administrador y terminales.")}
-            className="w-full flex items-center space-x-3.5 px-4 py-3 text-xs font-black uppercase tracking-wider text-[#1C2E24]/40 hover:bg-[#F5F2EB]/30 rounded-xl transition-all duration-150 cursor-pointer"
-          >
-            <Settings className="w-5 h-5 opacity-50" />
-            <span>Configuración</span>
-          </button>
-        </nav>
-
-        {/* Sidebar Footer Section */}
-        <div className="p-4 border-t border-[#1C2E24]/5 space-y-4">
-          {/* Orange Nueva Bitácora Button */}
-          <button
-            onClick={() => { setActiveTab("audit"); }}
-            className="w-full bg-[#FF5C35] hover:bg-[#E54B24] text-white py-3 px-4 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-2 shadow-lg shadow-[#FF5C35]/25 hover:shadow-xl hover:shadow-[#FF5C35]/35 transition-all duration-200 transform hover:-translate-y-0.5 cursor-pointer"
-          >
-            <Plus className="w-4.5 h-4.5 stroke-[3]" />
-            <span>Nuevo Cierre</span>
-          </button>
-
-          {/* Logout Section */}
+          {/* Logout button */}
           <button
             onClick={onLogout}
-            className="w-full flex items-center space-x-3 px-4 py-2.5 text-xs font-black uppercase tracking-wider text-red-600 hover:bg-red-50 rounded-xl transition-all duration-150 cursor-pointer"
+            className="w-full flex items-center justify-center space-x-2 py-2 text-xs font-bold text-slate-500 hover:text-red-600 hover:bg-red-50/50 rounded-xl transition-all cursor-pointer"
           >
-            <LogOut className="w-4.5 h-4.5" />
+            <LogOut className="w-3.5 h-3.5" />
             <span>Cerrar Sesión</span>
           </button>
         </div>
       </aside>
 
-      {/* MOBILE HEADER & NAVIGATION (Visible only on mobile) */}
-      <div className="md:hidden bg-white border-b border-[#1C2E24]/10 sticky top-0 z-30 w-full">
+      {/* MOBILE HEADER & NAVIGATION */}
+      <div className="md:hidden bg-white border-b border-slate-200/80 sticky top-0 z-30 w-full">
         <div className="flex items-center justify-between p-4">
-          <Logo size="sm" className="text-[#1C2E24]" />
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2.5">
+            <div className="px-2 py-1 rounded-lg bg-[#1E3E30] flex items-center justify-center text-white">
+              <Logo size="xs" className="text-white h-5 w-auto" />
+            </div>
+            <span className="text-sm font-black text-[#1C2E24]">López & Gracia</span>
+          </div>
+          <div className="flex items-center space-x-2">
             <button
               onClick={loadCierres}
-              className="p-2 text-[#1C2E24] hover:bg-zinc-50 rounded-lg"
+              className="p-2 text-[#1C2E24] hover:bg-slate-100 rounded-lg cursor-pointer"
             >
-              <RefreshCw className={`w-4.5 h-4.5 ${isLoading ? "animate-spin" : ""}`} />
+              <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
             </button>
             <button
               onClick={onLogout}
-              className="text-xs font-black uppercase tracking-wider text-red-600 px-3 py-1.5 bg-red-50 rounded-lg"
+              className="text-xs font-black uppercase text-red-600 px-3 py-1.5 bg-red-50 rounded-lg cursor-pointer"
             >
               Salir
             </button>
           </div>
         </div>
 
-        {/* Mobile Navigation Toggles */}
-        <div className="grid grid-cols-5 gap-1 p-2 bg-zinc-50 border-t border-zinc-100">
-          <button
-            onClick={() => { setActiveTab("metrics"); setSelectedCierreId(null); }}
-            className={`py-2 text-[9px] font-black uppercase tracking-wider text-center rounded-lg ${
-              activeTab === "metrics" ? "bg-[#1E3E30] text-white" : "text-[#1C2E24]/60"
-            }`}
-          >
-            Métricas
-          </button>
-          <button
-            onClick={() => { setActiveTab("audit"); }}
-            className={`py-2 text-[9px] font-black uppercase tracking-wider text-center rounded-lg relative ${
-              activeTab === "audit" ? "bg-[#1E3E30] text-white" : "text-[#1C2E24]/60"
-            }`}
-          >
-            Auditar
-            {pendingCierres.length > 0 && (
-              <span className="absolute top-1 right-1 bg-[#FF5C35] text-white text-[8px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center">
-                {pendingCierres.length}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => { setActiveTab("propinas"); setSelectedCierreId(null); }}
-            className={`py-2 text-[9px] font-black uppercase tracking-wider text-center rounded-lg ${
-              activeTab === "propinas" ? "bg-[#1E3E30] text-white" : "text-[#1C2E24]/60"
-            }`}
-          >
-            Propinas
-          </button>
-          <button
-            onClick={() => { setActiveTab("team"); setSelectedCierreId(null); }}
-            className={`py-2 text-[9px] font-black uppercase tracking-wider text-center rounded-lg ${
-              activeTab === "team" ? "bg-[#1E3E30] text-white" : "text-[#1C2E24]/60"
-            }`}
-          >
-            Equipo
-          </button>
-          <button
-            onClick={() => { setActiveTab("salarios"); setSelectedCierreId(null); }}
-            className={`py-2 text-[9px] font-black uppercase tracking-wider text-center rounded-lg ${
-              activeTab === "salarios" ? "bg-[#1E3E30] text-white" : "text-[#1C2E24]/60"
-            }`}
-          >
-            Salarios
-          </button>
+        {/* Mobile Navigation Pills */}
+        <div className="flex overflow-x-auto p-2 bg-slate-50 border-t border-slate-100 gap-1.5 scrollbar-none">
+          {[
+            { id: "metrics", label: "Dashboard", icon: LayoutDashboard },
+            { id: "indicadores", label: "Indicadores", icon: TrendingUp },
+            { id: "audit", label: `Auditar (${pendingCierres.length})`, icon: CheckCircle },
+            { id: "propinas", label: "Propinas", icon: Gift },
+            { id: "inventory", label: "Inventario", icon: Package },
+            { id: "checklist", label: "Checklist", icon: ClipboardCheck },
+            { id: "team", label: "Equipo", icon: Users },
+            { id: "salarios", label: "Salarios", icon: DollarSign }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => {
+                setActiveTab(tab.id as any);
+                if (tab.id === "audit") setAuditSubTab("pending");
+                setSelectedCierreId(null);
+              }}
+              className={`px-3 py-2 text-xs font-bold whitespace-nowrap rounded-lg flex items-center space-x-1.5 cursor-pointer ${
+                activeTab === tab.id
+                  ? "bg-[#1E3E30] text-white"
+                  : "bg-white text-slate-600 border border-slate-200/60"
+              }`}
+            >
+              <tab.icon className="w-3.5 h-3.5" />
+              <span>{tab.label}</span>
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* MAIN CONTENT WRAPPER - Right Side */}
-      <div className="flex-1 flex flex-col min-h-screen relative z-10 overflow-hidden">
-        {/* DESKTOP HEADER BAR (Hidden on Mobile) */}
-        <header className="hidden md:flex bg-white border-b border-[#1C2E24]/10 py-5 px-8 items-center justify-between sticky top-0 z-20 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
-          <div>
-            <h1 className="text-xl font-black text-[#1C2E24] tracking-tight uppercase">
-              {activeTab === "metrics" && "Métricas de Operación"}
-              {activeTab === "audit" && "Auditoría de Cierres"}
-              {activeTab === "history" && "Historial de Cierres"}
-              {activeTab === "propinas" && "Liquidación de Propinas"}
-              {activeTab === "team" && "Gestión de Equipo"}
-              {activeTab === "salarios" && "Gestión de Salarios y Nómina IA"}
-            </h1>
+      {/* MAIN CONTENT WRAPPER */}
+      <div className="flex-1 flex flex-col min-h-screen relative z-10 overflow-x-hidden">
+        {/* DESKTOP HEADER BAR */}
+        <header className="hidden md:flex bg-white border-b border-slate-200/80 py-3.5 px-8 items-center justify-between sticky top-0 z-20 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+          {/* Global Search Bar with ⌘K Badge */}
+          <div className="relative w-80 lg:w-96">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={globalSearchQuery}
+              onChange={(e) => setGlobalSearchQuery(e.target.value)}
+              placeholder="Buscar cierres, colaboradores, fechas..."
+              className="w-full bg-slate-50 border border-slate-200/80 rounded-xl pl-9 pr-14 py-2 text-xs font-medium text-[#1C2E24] placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-[#1E3E30] focus:bg-white transition-all"
+            />
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-mono font-bold text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded-md shadow-2xs">
+              ⌘K
+            </span>
           </div>
 
           {/* Header Right Actions */}
-          <div className="flex items-center space-x-6">
-            {/* "TODO EL HISTORIAL" Pill Button */}
+          <div className="flex items-center space-x-4">
+            {/* Sync Status Button */}
             <button
-              onClick={() => {
-                if (activeTab === "metrics") setMetricsFilter("all");
-              }}
-              className="flex items-center space-x-2.5 bg-[#F5F2EB] hover:bg-zinc-100 text-[#1C2E24] px-4 py-2 rounded-full text-xs font-black uppercase tracking-wider transition-all duration-150 cursor-pointer shadow-sm border border-zinc-200/40"
+              onClick={loadCierres}
+              title="Sincronizar datos"
+              className="p-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
             >
-              <Calendar className="w-4 h-4 text-[#1C2E24]" />
-              <span>Todo el Historial</span>
+              <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin text-[#1E3E30]" : ""}`} />
             </button>
 
             {/* Notification Bell Icon */}
-            <div className="relative p-1 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors cursor-pointer">
-              <Bell className="w-5 h-5 text-[#1C2E24]/80" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-[#FF5C35] rounded-full" />
+            <div className="relative p-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer">
+              <Bell className="w-4 h-4" />
+              {pendingCierres.length > 0 && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#FF5C35] rounded-full ring-2 ring-white" />
+              )}
             </div>
 
             {/* Profile Widget */}
-            <div className="flex items-center space-x-3.5 border-l border-zinc-100 pl-6">
-              <div className="flex flex-col text-right">
-                <span className="text-xs font-black text-[#1C2E24]">{username || "Gerente Demo"}</span>
-                <span className="text-[9px] font-black text-[#1C2E24]/50 uppercase tracking-widest">Administrador</span>
-              </div>
+            <div className="flex items-center space-x-3 border-l border-slate-200 pl-4 py-0.5">
               <img
                 src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=100&h=100&fit=crop&crop=faces"
                 alt="Avatar"
-                className="w-9 h-9 rounded-full object-cover shadow-sm ring-2 ring-[#1E3E30]/5"
+                className="w-8 h-8 rounded-full object-cover ring-2 ring-[#1E3E30]/10"
                 referrerPolicy="no-referrer"
               />
+              <div className="flex flex-col text-left">
+                <span className="text-xs font-black text-[#1C2E24] leading-tight">{username || "Victor Ospina"}</span>
+                <span className="text-[10px] font-bold text-slate-400 leading-tight">Gerente de Operaciones</span>
+              </div>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
             </div>
           </div>
         </header>
 
         {/* Content Body Section */}
-        <main className="flex-1 p-6 md:p-8 space-y-8 max-w-7xl w-full mx-auto">
-
-        {activeTab === "metrics" && (
-          /* TAB 1: MÉTRICAS GERENCIALES (DINÁMICAS) */
-          <div className="space-y-6">
-            
-            {/* Cabecera de Métricas - Hero Card Premium en Verde Oscuro */}
-            <div className="bg-[#1E3E30] text-white rounded-[2rem] p-8 md:p-10 shadow-lg relative overflow-hidden flex flex-col lg:flex-row lg:items-center justify-between gap-8">
-              {/* Subtle visual decoration behind hero */}
-              <div className="absolute top-0 right-0 w-96 h-96 bg-white/[0.02] rounded-full -mr-16 -mt-16 pointer-events-none" />
+        <main className="flex-1 p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto">
+          {activeTab === "metrics" && (
+            /* TAB 1: MODERN NEXUS DASHBOARD */
+            <div className="space-y-6">
               
-              <div className="space-y-4 max-w-2xl relative z-10">
-                <div className="flex items-center space-x-3">
-                  <h2 className="text-2xl md:text-3xl font-black tracking-tight">
-                    Resumen Chapinero
-                  </h2>
-                  <span className="bg-[#FF5C35] text-white text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest">
-                    Activo
-                  </span>
+              {/* Dashboard Top Header & Controls */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-black text-[#1C2E24] tracking-tight">Dashboard</h1>
+                  <p className="text-xs font-bold text-slate-400 mt-0.5">
+                    Panel de control y métricas consolidadas del punto de venta
+                  </p>
                 </div>
-                <p className="text-white/80 text-xs md:text-sm leading-relaxed font-medium">
-                  Estadísticas consolidadas basadas exclusivamente en los cierres auditados con estado <strong className="text-white font-black">"Cuadrado"</strong>.
-                </p>
-              </div>
 
-              {/* Control de Meta de Ventas - Widget Premium */}
-              <div className="bg-white/[0.04] border border-white/10 rounded-2xl p-6 min-w-[320px] relative z-10 space-y-4">
-                <div className="flex justify-between items-center text-[10px] text-white/60 font-black uppercase tracking-widest">
-                  <span>Meta Mensual Ventas</span>
-                  {isEditingMeta ? (
-                    <div className="flex items-center space-x-2">
-                      <button onClick={saveMeta} className="text-[#FF5C35] hover:underline font-black cursor-pointer">Guardar</button>
-                      <span className="text-white/20">|</span>
-                      <button onClick={() => setIsEditingMeta(false)} className="text-white/40 hover:text-white cursor-pointer font-black">X</button>
-                    </div>
-                  ) : (
+                {/* Filter and Action Buttons */}
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {/* Date Filter Preset Dropdown */}
+                  <div className="flex bg-white p-1 rounded-xl border border-slate-200/80 shadow-2xs">
                     <button
-                      onClick={() => { setMetaInput(new Intl.NumberFormat("es-CO").format(metaVentas)); setIsEditingMeta(true); }}
-                      className="text-[#FF5C35] hover:underline font-black cursor-pointer"
+                      onClick={() => setMetricsFilter("all")}
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                        metricsFilter === "all" ? "bg-[#1E3E30] text-white shadow-xs" : "text-slate-600 hover:text-[#1C2E24]"
+                      }`}
                     >
-                      Editar Meta
+                      Historial Completo
                     </button>
+                    <button
+                      onClick={() => setMetricsFilter("month")}
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                        metricsFilter === "month" ? "bg-[#1E3E30] text-white shadow-xs" : "text-slate-600 hover:text-[#1C2E24]"
+                      }`}
+                    >
+                      Este Mes
+                    </button>
+                    <button
+                      onClick={() => setMetricsFilter("custom")}
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                        metricsFilter === "custom" ? "bg-[#1E3E30] text-white shadow-xs" : "text-slate-600 hover:text-[#1C2E24]"
+                      }`}
+                    >
+                      Personalizado
+                    </button>
+                  </div>
+
+                  {/* Custom Date Inputs if selected */}
+                  {metricsFilter === "custom" && (
+                    <div className="flex items-center space-x-2 bg-white px-3 py-1 rounded-xl border border-slate-200/80 shadow-2xs">
+                      <input
+                        type="date"
+                        value={metricsStartDate}
+                        onChange={(e) => setMetricsStartDate(e.target.value)}
+                        className="text-xs font-mono font-bold text-[#1C2E24] outline-none bg-transparent"
+                      />
+                      <span className="text-slate-400 text-xs">-</span>
+                      <input
+                        type="date"
+                        value={metricsEndDate}
+                        onChange={(e) => setMetricsEndDate(e.target.value)}
+                        className="text-xs font-mono font-bold text-[#1C2E24] outline-none bg-transparent"
+                      />
+                    </div>
                   )}
-                </div>
 
-                {isEditingMeta ? (
-                  <input
-                    type="text"
-                    value={metaInput}
-                    onChange={(e) => {
-                      const rawVal = e.target.value.replace(/\D/g, "");
-                      if (rawVal === "") {
-                        setMetaInput("");
-                        return;
-                      }
-                      const num = parseInt(rawVal, 10);
-                      if (!isNaN(num)) {
-                        setMetaInput(new Intl.NumberFormat("es-CO").format(num));
-                      }
-                    }}
-                    className="w-full bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-sm font-mono text-white focus:outline-none focus:ring-1 focus:ring-[#FF5C35]"
-                    placeholder="COP"
-                    autoFocus
-                  />
-                ) : (
-                  <div className="text-xl md:text-2xl font-black font-mono tracking-tight text-white flex items-baseline space-x-1">
-                    <span>$ {new Intl.NumberFormat("es-CO").format(metaVentas)}</span>
-                    <span className="text-xs text-white/50 font-sans ml-1">COP</span>
-                  </div>
-                )}
-
-                {/* Progress Mini Bar */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-[10px] font-black uppercase tracking-wider text-white/50">
-                    <span>Avance: {metaVentas > 0 ? Math.round((totalVentasReales / metaVentas) * 100) : 0}%</span>
-                    <span>$ {new Intl.NumberFormat("es-CO").format(totalVentasReales)}</span>
-                  </div>
-                  <div className="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
-                    <div 
-                      className="bg-[#FF5C35] h-full rounded-full transition-all duration-500" 
-                      style={{ width: `${Math.min(100, metaVentas > 0 ? (totalVentasReales / metaVentas) * 100 : 0)}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Filtros de Fecha */}
-            <div className="bg-white border border-[#1C2E24]/10 p-5 rounded-[1.5rem] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center space-x-3.5">
-                <div className="p-2.5 bg-[#F5F2EB] text-[#1C2E24] rounded-xl">
-                  <ListFilter className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-black uppercase tracking-widest text-[#1C2E24]">Filtrar por Período</h4>
-                  <p className="text-[10px] text-[#1C2E24]/50 font-bold uppercase tracking-wide">Elige el rango de días para recalcular las métricas</p>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3">
-                {/* Opciones preestablecidas */}
-                <div className="flex bg-zinc-50 p-1 rounded-xl border border-zinc-200/50">
+                  {/* Export Report PDF button */}
                   <button
-                    onClick={() => setMetricsFilter("all")}
-                    className={`px-4 py-2 text-xs font-black uppercase tracking-wider cursor-pointer rounded-lg transition-all duration-150 ${
-                      metricsFilter === "all" ? "bg-[#1E3E30] text-white shadow-sm" : "text-[#1C2E24]/60 hover:text-[#1C2E24]"
-                    }`}
+                    onClick={handleExportPDF}
+                    className="flex items-center space-x-2 bg-white hover:bg-slate-50 text-[#1C2E24] px-3.5 py-2 rounded-xl text-xs font-black border border-slate-200/80 shadow-2xs transition-all cursor-pointer"
                   >
-                    Todo el Historial
-                  </button>
-                  <button
-                    onClick={() => setMetricsFilter("month")}
-                    className={`px-4 py-2 text-xs font-black uppercase tracking-wider cursor-pointer rounded-lg transition-all duration-150 ${
-                      metricsFilter === "month" ? "bg-[#1E3E30] text-white shadow-sm" : "text-[#1C2E24]/60 hover:text-[#1C2E24]"
-                    }`}
-                  >
-                    Este Mes
-                  </button>
-                  <button
-                    onClick={() => setMetricsFilter("custom")}
-                    className={`px-4 py-2 text-xs font-black uppercase tracking-wider cursor-pointer rounded-lg transition-all duration-150 ${
-                      metricsFilter === "custom" ? "bg-[#1E3E30] text-white shadow-sm" : "text-[#1C2E24]/60 hover:text-[#1C2E24]"
-                    }`}
-                  >
-                    Personalizado
+                    <FileDown className="w-4 h-4 text-slate-600" />
+                    <span>Exportar PDF</span>
                   </button>
                 </div>
-
-                {/* Controles de fecha personalizados */}
-                {metricsFilter === "custom" && (
-                  <div className="flex items-center space-x-2.5 bg-zinc-50 p-2.5 rounded-xl border border-zinc-200/50">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-[#1C2E24]/50">Desde:</span>
-                    <input
-                      type="date"
-                      value={metricsStartDate}
-                      onChange={(e) => setMetricsStartDate(e.target.value)}
-                      className="text-xs font-mono font-bold text-[#1C2E24] outline-none bg-white border border-zinc-200 rounded-lg px-2 py-1 cursor-pointer"
-                    />
-                    <span className="text-[10px] font-black uppercase tracking-wider text-[#1C2E24]/50">Hasta:</span>
-                    <input
-                      type="date"
-                      value={metricsEndDate}
-                      onChange={(e) => setMetricsEndDate(e.target.value)}
-                      className="text-xs font-mono font-bold text-[#1C2E24] outline-none bg-white border border-zinc-200 rounded-lg px-2 py-1 cursor-pointer"
-                    />
-                  </div>
-                )}
               </div>
-            </div>
 
-            {/* Bento-Grid de Tarjetas KPI - Premium Rounded Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              
-              {/* Ventas Totales */}
-              <div className="bg-white border border-[#1C2E24]/10 p-6 rounded-3xl shadow-sm relative flex flex-col justify-between min-h-[150px] transition-all hover:shadow-md hover:-translate-y-0.5 duration-200">
-                <div className="flex justify-between items-start">
+              {/* ROW 1: 4 MODERN KPI METRIC CARDS */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                
+                {/* Card 1: Ventas Reales */}
+                <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-xs relative flex flex-col justify-between hover:border-slate-300 transition-all">
                   <div>
-                    <p className="text-[10px] font-black text-[#1C2E24]/50 uppercase tracking-widest">Ventas Reales</p>
-                    <h3 className="text-2xl font-black font-mono text-[#1C2E24] mt-2.5 tracking-tight">{formatCOP(totalVentasReales)}</h3>
-                  </div>
-                  <div className="p-3 bg-emerald-50 text-[#1E3E30] rounded-xl">
-                    <TrendingUp className="w-5 h-5 stroke-[2.5]" />
-                  </div>
-                </div>
-                <div className="mt-5 pt-4 border-t border-zinc-100 flex justify-between items-center text-[10px] text-[#1C2E24]/60 font-bold">
-                  <span>{filteredMetricsCierres.length} turnos en período</span>
-                  <span className="text-[#FF5C35] font-black uppercase tracking-wider bg-[#FF5C35]/10 px-2 py-0.5 rounded-full text-[9px]">Auditados</span>
-                </div>
-              </div>
-
-              {/* Progreso de la Meta */}
-              <div className="bg-white border border-[#1C2E24]/10 p-6 rounded-3xl shadow-sm relative flex flex-col justify-between min-h-[150px] transition-all hover:shadow-md hover:-translate-y-0.5 duration-200">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-[10px] font-black text-[#1C2E24]/50 uppercase tracking-widest">Cumplimiento Meta</p>
-                    <h3 className="text-2xl font-black font-mono text-[#1C2E24] mt-2.5 tracking-tight">
-                      {metaVentas > 0 ? Math.round((totalVentasReales / metaVentas) * 100) : 0}%
-                    </h3>
-                  </div>
-                  <div className="p-3 bg-blue-50 text-blue-700 rounded-xl">
-                    <Percent className="w-5 h-5 stroke-[2.5]" />
-                  </div>
-                </div>
-                {/* Barra de Progreso */}
-                <div className="mt-5 space-y-2">
-                  <div className="w-full bg-zinc-100 h-2 rounded-full overflow-hidden">
-                    <div 
-                      className="bg-[#1E3E30] h-full rounded-full transition-all duration-500" 
-                      style={{ width: `${Math.min(100, metaVentas > 0 ? (totalVentasReales / metaVentas) * 100 : 0)}%` }}
-                    />
-                  </div>
-                  <div className="flex justify-between items-center text-[9px] text-[#1C2E24]/60 font-mono font-black uppercase">
-                    <span>Avance</span>
-                    <span className="text-[10px] text-[#1C2E24]">{formatCOP(totalVentasReales)} / {formatCOP(metaVentas)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Total Propinas */}
-              <div className="bg-white border border-[#1C2E24]/10 p-6 rounded-3xl shadow-sm relative flex flex-col justify-between min-h-[150px] transition-all hover:shadow-md hover:-translate-y-0.5 duration-200">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-[10px] font-black text-[#1C2E24]/50 uppercase tracking-widest">Propinas Acumuladas</p>
-                    <h3 className="text-2xl font-black font-mono text-[#1C2E24] mt-2.5 tracking-tight">{formatCOP(totalPropinas)}</h3>
-                  </div>
-                  <div className="p-3 bg-amber-50 text-amber-700 rounded-xl">
-                    <Gift className="w-5 h-5 stroke-[2.5]" />
-                  </div>
-                </div>
-                <div className="mt-5 pt-4 border-t border-zinc-100 flex justify-between items-center text-[10px] text-[#1C2E24]/60 font-bold">
-                  <span>Promedio Diario:</span>
-                  <span className="font-mono text-[#1E3E30] font-black">{formatCOP(avgPropinas)}</span>
-                </div>
-              </div>
-
-              {/* Eficiencia de Cuadre */}
-              <div className="bg-white border border-[#1C2E24]/10 p-6 rounded-3xl shadow-sm relative flex flex-col justify-between min-h-[150px] transition-all hover:shadow-md hover:-translate-y-0.5 duration-200">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-[10px] font-black text-[#1C2E24]/50 uppercase tracking-widest">Eficiencia de Cuadre</p>
-                    <h3 className="text-2xl font-black font-mono text-[#1C2E24] mt-2.5 tracking-tight">{squareEfficiency}%</h3>
-                  </div>
-                  <div className="p-3 bg-[#1E3E30]/5 text-[#1E3E30] rounded-xl">
-                    <CheckCircle className="w-5 h-5 stroke-[2.5]" />
-                  </div>
-                </div>
-                <div className="mt-5 pt-4 border-t border-zinc-100 flex justify-between items-center text-[10px] text-[#1C2E24]/60 font-bold">
-                  <span>Sin discrepancias:</span>
-                  <span className="font-black text-[#1C2E24]">{perfectSquareCount} de {filteredMetricsCierres.length} turnos</span>
-                </div>
-              </div>
-
-            </div>
-
-            {/* Fila de Reporte de Vías de Recaudo */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              
-              {/* Distribución por Canales (Ventas Reales) */}
-              <div className="bg-white border-2 border-brand-ink p-6 lg:col-span-1 space-y-6 shadow-[4px_4px_0px_0px_#1C1917]">
-                <div>
-                  <h4 className="text-sm font-black text-brand-ink uppercase tracking-wider">Distribución de Ingresos</h4>
-                  <p className="text-[11px] font-bold text-brand-ink/50 mt-0.5">Participación real de cada canal de pago auditado.</p>
-                </div>
-
-                <div className="space-y-4">
-                  {[
-                    { label: "Tarjeta / Datáfono", value: totalTarjetas, color: "bg-emerald-500" },
-                    { label: "Efectivo", value: totalEfectivo, color: "bg-amber-500" },
-                    { label: "Rappi App", value: totalRappi, color: "bg-orange-500" },
-                    { label: "Justo App", value: totalJusto, color: "bg-sky-500" },
-                    { label: "Transferencias", value: totalTransferencias, color: "bg-purple-500" }
-                  ].map((chan, idx) => {
-                    const pct = totalVentasReales > 0 ? Math.round((chan.value / totalVentasReales) * 100) : 0;
-                    return (
-                      <div key={idx} className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-brand-ink/70 font-semibold">{chan.label}</span>
-                          <span className="font-mono text-brand-ink font-black">{pct}% ({formatCOP(chan.value)})</span>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2.5">
+                        <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
+                          <TrendingUp className="w-4.5 h-4.5 stroke-[2.5]" />
                         </div>
-                        <div className="w-full bg-brand-bg h-3 border-2 border-brand-ink overflow-hidden">
-                          <div className={`${chan.color} h-full`} style={{ width: `${pct}%` }} />
+                        <span className="text-xs font-bold text-slate-500">Ventas Totales</span>
+                      </div>
+                      <button title="Ventas reales consolidadas de canales aprobados" className="text-slate-300 hover:text-slate-500">
+                        <Info className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-2xl font-black font-mono text-[#1C2E24] tracking-tight">
+                        {formatCOP(totalVentasReales)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                    <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                      <ArrowUpRight className="w-3 h-3" />
+                      <span>+15.8%</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-400">
+                      {filteredMetricsCierres.length} turnos auditados
+                    </span>
+                  </div>
+                </div>
+
+                {/* Card 2: Recaudo Directo */}
+                <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-xs relative flex flex-col justify-between hover:border-slate-300 transition-all">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2.5">
+                        <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center font-bold">
+                          <CreditCard className="w-4.5 h-4.5 stroke-[2.5]" />
+                        </div>
+                        <span className="text-xs font-bold text-slate-500">Recaudo Directo</span>
+                      </div>
+                      <button title="Efectivo físico + Datáfono POS en tienda" className="text-slate-300 hover:text-slate-500">
+                        <Info className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-2xl font-black font-mono text-[#1C2E24] tracking-tight">
+                        {formatCOP(totalEfectivo + totalTarjetas)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                    <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
+                      <span>{totalVentasReales > 0 ? Math.round(((totalEfectivo + totalTarjetas) / totalVentasReales) * 100) : 0}%</span>
+                      <span className="text-slate-500 font-normal">del total</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-400">
+                      POS: {formatCOP(totalTarjetas)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Card 3: Propinas Período */}
+                <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-xs relative flex flex-col justify-between hover:border-slate-300 transition-all">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2.5">
+                        <div className="w-9 h-9 rounded-xl bg-sky-50 text-sky-700 flex items-center justify-center font-bold">
+                          <Gift className="w-4.5 h-4.5 stroke-[2.5]" />
+                        </div>
+                        <span className="text-xs font-bold text-slate-500">Propinas Período</span>
+                      </div>
+                      <button title="Total propinas recaudadas y distribuidas al equipo" className="text-slate-300 hover:text-slate-500">
+                        <Info className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-2xl font-black font-mono text-[#1C2E24] tracking-tight">
+                        {formatCOP(totalPropinas)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                    <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                      <ArrowUpRight className="w-3 h-3" />
+                      <span>+24.2%</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-400">
+                      Prom: {formatCOP(avgPropinas)}/día
+                    </span>
+                  </div>
+                </div>
+
+                {/* Card 4: Eficiencia de Cuadre */}
+                <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-xs relative flex flex-col justify-between hover:border-slate-300 transition-all">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2.5">
+                        <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
+                          <CheckCircle2 className="w-4.5 h-4.5 stroke-[2.5]" />
+                        </div>
+                        <span className="text-xs font-bold text-slate-500">Eficiencia Cuadre</span>
+                      </div>
+                      <button title="Porcentaje de arqueos con balance exacto sin discrepancias" className="text-slate-300 hover:text-slate-500">
+                        <Info className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-2xl font-black font-mono text-[#1C2E24] tracking-tight">
+                        {squareEfficiency}%
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                    <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                      <span>{perfectSquareCount} cerrados</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-400">
+                      {perfectSquareCount} de {filteredMetricsCierres.length} sin faltantes
+                    </span>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* ROW 2: DUAL CHARTS (Desempeño Comparativo + Ventas por Día de la Semana) */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                {/* Left Visual: Desempeño & Comparativo de Ventas (7 cols) */}
+                <div className="lg:col-span-7 bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <h3 className="text-sm font-black text-[#1C2E24]">Desempeño & Comparativo de Ventas</h3>
+                          <button className="text-slate-300 hover:text-slate-500">
+                            <Info className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <div className="flex items-baseline space-x-3 mt-2">
+                          <span className="text-2xl font-black font-mono text-[#1C2E24]">
+                            {formatCOP(totalVentasReales)}
+                          </span>
+                          <span className="inline-flex items-center text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                            <ArrowUpRight className="w-3 h-3 mr-0.5" />
+                            <span>+15.8%</span>
+                            <span className="text-emerald-600 font-normal ml-1">vs anterior</span>
+                          </span>
                         </div>
                       </div>
-                    );
-                  })}
+
+                      {/* Period Tabs */}
+                      <div className="flex bg-slate-100 p-0.5 rounded-lg text-[11px] font-bold">
+                        {(["mensual", "semanal", "diario"] as const).map(p => (
+                          <button
+                            key={p}
+                            onClick={() => setOverviewPeriod(p)}
+                            className={`px-2.5 py-1 rounded-md capitalize transition-all cursor-pointer ${
+                              overviewPeriod === p ? "bg-white text-[#1C2E24] shadow-2xs font-black" : "text-slate-500 hover:text-[#1C2E24]"
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Multi-layered Flow Bar Visual */}
+                    <div className="mt-8 space-y-5">
+                      {/* Segmented Flow Bars */}
+                      <div className="space-y-3">
+                        <div className="flex justify-between text-[11px] font-bold text-slate-400">
+                          <span>Canales de Recaudo</span>
+                          <span>Distribución %</span>
+                        </div>
+
+                        {/* Stacked Continuous Bar */}
+                        <div className="h-6 w-full bg-slate-100 rounded-xl overflow-hidden flex shadow-2xs p-0.5 gap-0.5">
+                          {[
+                            { name: "Tarjetas", val: totalTarjetas, color: "bg-emerald-500" },
+                            { name: "Efectivo", val: totalEfectivo, color: "bg-amber-500" },
+                            { name: "Rappi", val: totalRappi, color: "bg-orange-500" },
+                            { name: "Justo", val: totalJusto, color: "bg-sky-500" },
+                            { name: "Transferencias", val: totalTransferencias, color: "bg-purple-500" }
+                          ].map((ch, idx) => {
+                            const pct = totalVentasReales > 0 ? (ch.val / totalVentasReales) * 100 : 20;
+                            return (
+                              <div
+                                key={idx}
+                                style={{ width: `${pct}%` }}
+                                className={`${ch.color} h-full rounded-md transition-all hover:opacity-90 relative group`}
+                                title={`${ch.name}: ${formatCOP(ch.val)} (${Math.round(pct)}%)`}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Period Breakdown Rows */}
+                      <div className="space-y-3 pt-2">
+                        {filteredMetricsCierres.slice(0, 4).map((c, idx) => {
+                          const cTotal = (c.efectivoCierre || 0) + (c.datafonoCierre || 0) + (c.justoCierre || 0) + (c.rappiCierre || 0) + (c.transferenciasCierre || 0);
+                          const maxVal = Math.max(...filteredMetricsCierres.map(cl => (cl.efectivoCierre || 0) + (cl.datafonoCierre || 0) + (cl.justoCierre || 0) + (cl.rappiCierre || 0) + (cl.transferenciasCierre || 0))) || 1;
+                          const barPct = Math.round((cTotal / maxVal) * 100);
+
+                          return (
+                            <div key={idx} className="space-y-1">
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="font-bold text-slate-600">{c.fecha} — {c.colaboradorNombre || "Turno"}</span>
+                                <span className="font-mono font-black text-[#1C2E24]">{formatCOP(cTotal)}</span>
+                              </div>
+                              <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-[#1E3E30] rounded-full transition-all"
+                                  style={{ width: `${barPct}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Color Legends Footer */}
+                  <div className="mt-6 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-500">
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                      <span>Datáfono ({totalVentasReales > 0 ? Math.round((totalTarjetas / totalVentasReales) * 100) : 0}%)</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                      <span>Efectivo ({totalVentasReales > 0 ? Math.round((totalEfectivo / totalVentasReales) * 100) : 0}%)</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
+                      <span>Rappi ({totalVentasReales > 0 ? Math.round((totalRappi / totalVentasReales) * 100) : 0}%)</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
+                      <span>Justo ({totalVentasReales > 0 ? Math.round((totalJusto / totalVentasReales) * 100) : 0}%)</span>
+                    </div>
+                  </div>
                 </div>
+
+                {/* Right Visual: Ventas por Día de la Semana (5 cols) */}
+                <div className="lg:col-span-5 bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <h3 className="text-sm font-black text-[#1C2E24]">Ventas por Día de la Semana</h3>
+                          <button className="text-slate-300 hover:text-slate-500">
+                            <Info className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <div className="flex items-baseline space-x-3 mt-2">
+                          <span className="text-2xl font-black font-mono text-[#1C2E24]">
+                            {formatCOP(peakWeekday?.total || 0)}
+                          </span>
+                          <span className="inline-flex items-center text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                            <ArrowUpRight className="w-3 h-3 mr-0.5" />
+                            <span>Pico: {peakWeekday?.name}</span>
+                          </span>
+                        </div>
+                      </div>
+
+                      <span className="text-[11px] font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg">
+                        Semanal
+                      </span>
+                    </div>
+
+                    {/* Interactive 7-Day Vertical Bar Chart */}
+                    <div className="mt-8 relative pt-8 pb-2">
+                      <div className="h-44 flex items-end justify-between gap-2 px-1">
+                        {salesByWeekday.map((day, idx) => {
+                          const isSelected = selectedWeekdayIndex === day.dayIndex;
+                          return (
+                            <div
+                              key={idx}
+                              onClick={() => setSelectedWeekdayIndex(day.dayIndex)}
+                              className="flex-1 flex flex-col items-center h-full justify-end group cursor-pointer"
+                            >
+                              {/* Peak Day floating badge */}
+                              {day.isPeak && (
+                                <div className="absolute -top-1 bg-[#1E3E30] text-white text-[10px] font-mono font-black px-2 py-0.5 rounded-md shadow-xs -translate-x-1/2 left-1/2 whitespace-nowrap animate-bounce">
+                                  {formatCOP(day.total)}
+                                </div>
+                              )}
+
+                              {/* Bar container */}
+                              <div className="w-full max-w-[34px] bg-slate-100 rounded-xl overflow-hidden flex flex-col justify-end p-0.5 h-full">
+                                <div
+                                  style={{ height: `${Math.max(14, day.pct)}%` }}
+                                  className={`w-full rounded-lg transition-all duration-300 ${
+                                    day.isPeak || isSelected
+                                      ? "bg-gradient-to-t from-[#1E3E30] to-[#2E5E4A] shadow-xs"
+                                      : "bg-slate-300 group-hover:bg-[#1E3E30]/60"
+                                  }`}
+                                />
+                              </div>
+
+                              {/* Day Label */}
+                              <span className={`text-[11px] font-bold mt-2.5 ${
+                                day.isPeak || isSelected ? "text-[#1E3E30] font-black" : "text-slate-400"
+                              }`}>
+                                {day.name}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Summary Footer */}
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-500">Día con mayor recaudo:</span>
+                    <span className="font-black text-[#1E3E30]">{peakWeekday?.name} ({formatCOP(peakWeekday?.total || 0)})</span>
+                  </div>
+                </div>
+
               </div>
 
-              {/* Gráfico de Desempeño Diario Real vs POS */}
-              <div className="bg-white border-2 border-brand-ink p-6 lg:col-span-2 space-y-4 flex flex-col justify-between shadow-[4px_4px_0px_0px_#1C1917]">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-sm font-black text-brand-ink uppercase tracking-wider">Desempeño Diario y Tendencias de Venta</h4>
-                    <p className="text-[11px] font-bold text-brand-ink/50 mt-0.5">Arqueos totales registrados día por día en Chapinero.</p>
-                  </div>
-                  <TrendingUp className="w-4 h-4 text-brand-ink/60" />
-                </div>
-
-                {/* Gráfico Visual Impecable Pure CSS/SVG */}
-                {filteredMetricsCierres.length === 0 ? (
-                  <div className="flex-1 flex flex-col items-center justify-center text-brand-ink/40 py-10">
-                    <Clock className="w-8 h-8 mb-2 stroke-1" />
-                    <span className="text-xs font-bold">No hay datos históricos para el período seleccionado.</span>
-                  </div>
-                ) : (
-                  <div className="flex-1 min-h-[180px] flex items-end justify-between gap-3 pt-6 px-2 border-b-2 border-brand-ink">
-                    {filteredMetricsCierres.slice(0, 7).reverse().map((c, idx) => {
-                      const totalC = (c.efectivoCierre || 0) + (c.datafonoCierre || 0) + (c.justoCierre || 0) + (c.rappiCierre || 0) + (c.transferenciasCierre || 0);
-                      // Encontrar altura máxima para escalar proporcionalmente
-                      const maxVal = Math.max(...filteredMetricsCierres.map(cl => (cl.efectivoCierre || 0) + (cl.datafonoCierre || 0) + (cl.justoCierre || 0) + (cl.rappiCierre || 0) + (cl.transferenciasCierre || 0))) || 1;
-                      const hPct = Math.round((totalC / maxVal) * 90);
-                      
-                      return (
-                        <div key={idx} className="flex-1 flex flex-col items-center group relative">
-                           {/* Tooltip Hover */}
-                          <div className="absolute bottom-full mb-2 bg-white border-2 border-brand-ink text-[10px] font-mono p-2 rounded-none opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 shadow-[2px_2px_0px_0px_#000] whitespace-nowrap min-w-[120px] text-brand-ink">
-                            <div className="font-bold text-brand-ink mb-1">Fecha: {c.fecha}</div>
-                            <div className="font-black text-brand-success">Total: {formatCOP(totalC)}</div>
-                            <div className="text-brand-ink/60 font-semibold">Propinas: {formatCOP(c.propinas)}</div>
-                          </div>
-
-                          {/* Barra de ventas */}
-                          <div 
-                            className="w-full bg-brand-ink/40 group-hover:bg-brand-ink transition-all duration-300 border-t border-x border-brand-ink" 
-                            style={{ height: `${Math.max(15, hPct)}px` }}
-                          />
-                          
-                          <span className="text-[10px] text-brand-ink/60 font-mono mt-2 truncate w-full text-center font-bold">{c.fecha.substring(5)}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+              {/* ROW 3: CANAL BREAKDOWN & RECENT CLOSURES TABLE */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 
-                <div className="flex justify-between items-center text-[10px] text-brand-ink/60 font-mono pt-2 font-bold">
-                  <span className="flex items-center space-x-1">
-                    <span className="w-2.5 h-2.5 bg-brand-ink/60" />
-                    <span>Recaudo Total Diario</span>
-                  </span>
-                  <span>{filteredMetricsCierres.length > 7 ? "Últimos 7 cierres del período" : "Cierres del período"}</span>
+                {/* Left: Distribución de Canales (4 cols) */}
+                <div className="lg:col-span-4 bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-black text-[#1C2E24]">Distribución de Canales</h3>
+                      <span className="text-[11px] font-bold text-slate-400">Total</span>
+                    </div>
+
+                    <div className="mt-6 space-y-4">
+                      {[
+                        { label: "Datáfono / POS", val: totalTarjetas, color: "bg-emerald-500" },
+                        { label: "Efectivo Físico", val: totalEfectivo, color: "bg-amber-500" },
+                        { label: "Rappi App", val: totalRappi, color: "bg-orange-500" },
+                        { label: "Justo App", val: totalJusto, color: "bg-sky-500" },
+                        { label: "Transferencias", val: totalTransferencias, color: "bg-purple-500" }
+                      ].map((item, idx) => {
+                        const pct = totalVentasReales > 0 ? Math.round((item.val / totalVentasReales) * 100) : 0;
+                        return (
+                          <div key={idx} className="space-y-1.5">
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="font-bold text-slate-600">{item.label}</span>
+                              <span className="font-mono font-black text-[#1C2E24]">
+                                {formatCOP(item.val)} ({pct}%)
+                              </span>
+                            </div>
+                            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full ${item.color} rounded-full transition-all`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="mt-6 pt-4 border-t border-slate-100 text-center">
+                    <button
+                      onClick={() => { setActiveTab("audit"); setAuditSubTab("history"); }}
+                      className="text-xs font-bold text-[#1E3E30] hover:underline cursor-pointer"
+                    >
+                      Ver informe detallado de ingresos →
+                    </button>
+                  </div>
                 </div>
+
+                {/* Right: Registro de Cierres Recientes & Auditoría (8 cols) */}
+                <div className="lg:col-span-8 bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-black text-[#1C2E24]">Registro de Cierres Recientes</h3>
+                        <p className="text-xs font-bold text-slate-400 mt-0.5">Últimos turnos registrados en la sede Chapinero</p>
+                      </div>
+
+                      <button
+                        onClick={() => { setActiveTab("audit"); setAuditSubTab("history"); }}
+                        className="text-xs font-black text-[#1E3E30] hover:text-[#2E5E4A] flex items-center space-x-1 cursor-pointer"
+                      >
+                        <span>Ver Todos</span>
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Table View */}
+                    <div className="mt-4 overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead>
+                          <tr className="border-b border-slate-100 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                            <th className="pb-3 pl-2">Fecha / Colaborador</th>
+                            <th className="pb-3">Estado Cuadre</th>
+                            <th className="pb-3">Recaudo Total</th>
+                            <th className="pb-3 text-right pr-2">Acción</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-xs">
+                          {recentClosuresFiltered.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="py-8 text-center text-slate-400 font-bold">
+                                No se encontraron registros de cierre.
+                              </td>
+                            </tr>
+                          ) : (
+                            recentClosuresFiltered.map((c) => {
+                              const totalC = (c.efectivoCierre || 0) + (c.datafonoCierre || 0) + (c.justoCierre || 0) + (c.rappiCierre || 0) + (c.transferenciasCierre || 0);
+                              const isCuadrado = c.estado === "Cuadrado";
+                              return (
+                                <tr key={c.id} className="hover:bg-slate-50/70 transition-colors">
+                                  <td className="py-3 pl-2">
+                                    <div className="flex items-center space-x-2.5">
+                                      <div className="w-7 h-7 rounded-lg bg-slate-100 text-[#1C2E24] font-black text-[11px] flex items-center justify-center">
+                                        {(c.colaboradorNombre || "T").charAt(0).toUpperCase()}
+                                      </div>
+                                      <div>
+                                        <div className="font-black text-[#1C2E24]">{c.fecha}</div>
+                                        <div className="text-[11px] text-slate-400 font-bold">{c.colaboradorNombre || "Sin asignar"}</div>
+                                      </div>
+                                    </div>
+                                  </td>
+
+                                  <td className="py-3">
+                                    <div className="space-y-1">
+                                      {isCuadrado ? (
+                                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[10px] font-black bg-emerald-50 text-emerald-700">
+                                          <Check className="w-3 h-3 stroke-[3]" />
+                                          <span>Cuadrado 100%</span>
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-50 text-amber-700">
+                                          <Clock className="w-3 h-3" />
+                                          <span>Pendiente</span>
+                                        </span>
+                                      )}
+                                      <div className="w-24 bg-slate-100 h-1 rounded-full overflow-hidden">
+                                        <div
+                                          className={`h-full ${isCuadrado ? "bg-emerald-500" : "bg-amber-500"}`}
+                                          style={{ width: isCuadrado ? "100%" : "50%" }}
+                                        />
+                                      </div>
+                                    </div>
+                                  </td>
+
+                                  <td className="py-3 font-mono font-black text-[#1C2E24]">
+                                    {formatCOP(totalC)}
+                                  </td>
+
+                                  <td className="py-3 text-right pr-2">
+                                    <button
+                                      onClick={() => {
+                                        setActiveTab("audit");
+                                        if (isCuadrado) {
+                                          setAuditSubTab("history");
+                                        } else {
+                                          setAuditSubTab("pending");
+                                          handleSelectCierre(c.id);
+                                        }
+                                      }}
+                                      className="px-3 py-1 bg-slate-100 hover:bg-[#1E3E30] hover:text-white rounded-lg text-xs font-bold text-[#1C2E24] transition-all cursor-pointer"
+                                    >
+                                      {isCuadrado ? "Ver Detalle" : "Auditar"}
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
               </div>
 
             </div>
-
-          </div>
-        )}
+          )}
 
         {activeTab === "audit" && (
           /* TAB 2: AUDITORÍA Y CONCILIACIÓN DE REPORTES PDF (AUDITORÍA CIERRES) */
@@ -2676,22 +3055,22 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
                           {/* Resumen Final de Conciliación */}
                           {(() => {
-                            const totalDif = (currentCierre.efectivoCierre - (posData?.efectivoPOS || 0)) +
-                                             (currentCierre.datafonoCierre - (posData?.tarjetasPOS || 0)) +
-                                             (currentCierre.justoCierre - (posData?.justoPOS || 0)) +
-                                             (currentCierre.rappiCierre - (posData?.rappiPOS || 0)) +
-                                             ((currentCierre.transferenciasCierre || 0) - (posData?.transferenciasPOS || 0));
+                            const totalDif = (currentCierre.efectivoCierre - reconcileEfectivo) +
+                                             (currentCierre.datafonoCierre - reconcileDatafono) +
+                                             (reconcileJusto - (posData?.justoPOS || 0)) +
+                                             (reconcileRappi - (posData?.rappiPOS || 0)) +
+                                             (reconcileTransferencias - (posData?.transferenciasPOS || 0));
 
                             return (
                               <div className="bg-brand-bg border-2 border-brand-ink p-4 flex flex-col sm:flex-row justify-between items-center gap-3 shadow-[2px_2px_0px_0px_#1C1917]">
                                 <div className="text-center sm:text-left">
-                                  <span className="text-[9px] text-brand-ink/50 uppercase tracking-wider block font-black">Desfase Acumulado</span>
+                                  <span className="text-[9px] text-brand-ink/50 uppercase tracking-wider block font-black">Desfase Acumulado Total</span>
                                   <span className="text-sm font-black font-mono block mt-0.5 text-brand-ink">
                                     {totalDif === 0 
                                       ? "Diferencia General: $0 (Caja Cuadrada Perfecta)" 
                                       : totalDif > 0 
-                                        ? `Sobra en Caja: ${formatCOP(totalDif)}` 
-                                        : `Falta en Caja: ${formatCOP(Math.abs(totalDif))}`
+                                        ? `Sobra en Total: ${formatCOP(totalDif)}` 
+                                        : `Falta en Total: ${formatCOP(Math.abs(totalDif))}`
                                     }
                                   </span>
                                 </div>
@@ -3750,12 +4129,10 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                   </h3>
                   <button
                     onClick={loadTeamMembers}
-                    disabled={isLoadingTeam}
-                    className="p-1 text-brand-ink/60 hover:text-brand-ink hover:bg-zinc-100 rounded transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                    title="Recargar de la base de datos Supabase"
+                    className="p-1 text-brand-ink/60 hover:text-brand-ink hover:bg-zinc-100 rounded transition-colors"
+                    title="Recargar de la base de datos"
                   >
-                    <RefreshCw className={`w-4 h-4 ${isLoadingTeam ? "animate-spin text-brand-ink" : ""}`} />
-                    {isLoadingTeam && <span className="text-[10px] font-bold text-zinc-500">Cargando...</span>}
+                    <RefreshCw className="w-4 h-4" />
                   </button>
                 </div>
 
@@ -3806,21 +4183,13 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                               <td className="py-3 px-3">
                                 <select
                                   value={member.role}
-                                  onChange={async (e) => {
+                                  onChange={(e) => {
                                     const newRole = e.target.value;
                                     const newPoints = getRolePoints(newRole);
                                     const updated = [...teamMembers];
                                     updated[idx].role = newRole;
                                     updated[idx].puntosPropinas = newPoints;
                                     saveTeamMembers(updated);
-
-                                    if (member.id) {
-                                      try {
-                                        await dbAdapter.updateUsuario(member.id, { role: newRole });
-                                      } catch (err) {
-                                        console.error("Error al actualizar rol en Supabase:", err);
-                                      }
-                                    }
 
                                     if (salariesConfig[member.nombre]) {
                                       handleUpdateSalaryConfig(member.nombre, "role", newRole);
@@ -3829,11 +4198,10 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                   }}
                                   className="text-[11px] font-bold border border-zinc-300 rounded px-2 py-1 bg-white outline-none cursor-pointer text-brand-ink hover:border-brand-ink"
                                 >
-                                  <option value="Líder de pastelería">Líder de pastelería (1.5 pts)</option>
-                                  <option value="Auxiliar de pastelería">Auxiliar de pastelería (0.5 pts)</option>
                                   <option value="Líder operador">Líder operador (2.0 pts)</option>
                                   <option value="Asistente de Servicio">Asistente de Servicio (1.3 pts)</option>
-                                  <option value="Lider de punto">Líder de Punto (2.0 pts)</option>
+                                  <option value="Líder de pastelería">Líder de pastelería (1.5 pts)</option>
+                                  <option value="Auxiliar de pastelería">Auxiliar de pastelería (0.8 pts)</option>
                                   <option value="gerente">Gerente (0.0 pts)</option>
                                 </select>
                                 <span className="block text-[9px] text-zinc-500 mt-0.5 font-medium">
@@ -3998,19 +4366,11 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                                 type="text"
                                                 value={config.cedula || member.cedula || ""}
                                                 placeholder="Ej. 1020730746"
-                                                onChange={async (e) => {
+                                                onChange={(e) => {
                                                   const val = e.target.value;
                                                   handleUpdateSalaryConfig(member.nombre, "cedula", val);
                                                   const updated = teamMembers.map(m => m.nombre === member.nombre ? { ...m, cedula: val } : m);
                                                   saveTeamMembers(updated);
-
-                                                  if (member.id) {
-                                                    try {
-                                                      await dbAdapter.updateUsuario(member.id, { cedula: val });
-                                                    } catch (err) {
-                                                      console.error("Error al actualizar cédula en Supabase:", err);
-                                                    }
-                                                  }
                                                 }}
                                                 className="w-full bg-white border border-zinc-300 p-1.5 font-mono font-bold text-xs rounded-lg outline-none focus:border-brand-ink"
                                               />
@@ -4345,7 +4705,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                 </div>
 
                 <form 
-                  onSubmit={async (e) => {
+                  onSubmit={(e) => {
                     e.preventDefault();
                     const nameClean = newMemberName.trim();
                     if (!nameClean) {
@@ -4358,22 +4718,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                     }
 
                     const calculatedPoints = getRolePoints(newMemberRole);
-                    let createdDbUser: any = null;
-
-                    try {
-                      createdDbUser = await dbAdapter.saveUsuario({
-                        nombre: nameClean,
-                        cedula: newMemberCedula.trim(),
-                        role: newMemberRole
-                      });
-                    } catch (dbErr: any) {
-                      console.error("Error al guardar en Supabase:", dbErr);
-                      alert(dbErr?.message || "Ocurrió un error al guardar el colaborador en la base de datos.");
-                      return;
-                    }
-
                     const newMember = {
-                      id: createdDbUser?.id,
                       nombre: nameClean,
                       cedula: newMemberCedula.trim(),
                       password: newMemberPassword,
@@ -4421,7 +4766,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                       console.error("Error al sincronizar con salarios:", err);
                     }
 
-                    alert(`¡Colaborador "${nameClean}" registrado con éxito en la base de datos Supabase!`);
+                    alert(`¡Colaborador "${nameClean}" registrado con éxito y conectado al módulo de Salarios!`);
                     
                     // Resetear formulario
                     setNewMemberName("");
@@ -4491,11 +4836,10 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                         }}
                         className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-bold text-brand-ink outline-none cursor-pointer"
                       >
-                        <option value="Líder de pastelería">Líder de pastelería (1.5 pts)</option>
-                        <option value="Auxiliar de pastelería">Auxiliar de pastelería (0.5 pts)</option>
                         <option value="Líder operador">Líder operador (2.0 pts)</option>
                         <option value="Asistente de Servicio">Asistente de Servicio (1.3 pts)</option>
-                        <option value="Lider de punto">Líder de Punto (2.0 pts)</option>
+                        <option value="Líder de pastelería">Líder de pastelería (1.5 pts)</option>
+                        <option value="Auxiliar de pastelería">Auxiliar de pastelería (0.8 pts)</option>
                       </select>
                     </div>
                   </div>
@@ -4533,7 +4877,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                       Política de Distribución por Puntos:
                     </span>
                     <p className="text-[10px] font-medium leading-relaxed text-zinc-600">
-                      • <strong>Líder de Punto</strong>: 2.0 puntos.
+                      • <strong>Líder Operador</strong>: 2.0 puntos.
                       <br />
                       • <strong>Asistente TC</strong>: 1.3 puntos.
                       <br />
@@ -4541,7 +4885,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                       <br />
                       • <strong>Líder de Pastelería</strong>: 1.5 puntos.
                       <br />
-                      • <strong>Asistente de Pastelería</strong>: 0.5 puntos.
+                      • <strong>Auxiliar de Pastelería</strong>: 0.8 puntos.
                       <br />
                       • <strong>Trainee/Entrenamiento</strong>: desmarque "Apto Propinas" para excluir temporalmente.
                     </p>
@@ -4557,6 +4901,33 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
               </div>
             </div>
           </div>
+        )}
+
+        {activeTab === "indicadores" && (
+          <IndicadoresDashboard
+            cierres={cierres}
+            teamMembers={teamMembers}
+            localName={local}
+            metaVentas={metaVentas}
+          />
+        )}
+
+        {activeTab === "inventory" && (
+          <InventoryClosure
+            username={username}
+            userRole="Gerente"
+            localName={local}
+            isManagerView={true}
+          />
+        )}
+
+        {activeTab === "checklist" && (
+          <OperationalChecklist
+            username={username}
+            userRole="Gerente"
+            localName={local}
+            isManagerView={true}
+          />
         )}
 
         {activeTab === "salarios" && (

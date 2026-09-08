@@ -1,12 +1,25 @@
-import React, { useState } from "react";
-import { Lock, User, Eye, EyeOff, UserPlus, LogIn, Mail } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Lock, User, Eye, EyeOff, ShieldCheck, UserPlus, LogIn, ChevronRight, FileText } from "lucide-react";
 import { UserRole } from "../types";
 import Logo from "./Logo";
-import { supabase, isSupabaseConfigured } from "../db/supabaseConfig";
 
 interface LoginProps {
   onLoginSuccess: (role: UserRole, username: string, local: string) => void;
 }
+
+interface RegisteredUser {
+  nombre: string;
+  cedula?: string;
+  password: string;
+  role: UserRole;
+  local?: string;
+}
+
+const DEFAULT_USERS: RegisteredUser[] = [
+  { nombre: "Gerente", cedula: "1020730746", password: "admin", role: "gerente", local: "Chapinero" },
+  { nombre: "Colaborador Lider", cedula: "1018432109", password: "tienda", role: "Líder operador", local: "Chapinero" },
+  { nombre: "Colaborador Auxiliar", cedula: "1032456789", password: "tienda", role: "Asistente de Servicio", local: "Chapinero" }
+];
 
 export default function Login({ onLoginSuccess }: LoginProps) {
   const [activeTab, setActiveTab] = useState<"login" | "register">("login");
@@ -18,8 +31,10 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   
   // Register State
   const [regUsername, setRegUsername] = useState("");
-  const [regEmail, setRegEmail] = useState("");
+  const [regCedula, setRegCedula] = useState("");
   const [regPassword, setRegPassword] = useState("");
+  const [regRole, setRegRole] = useState<UserRole>("Asistente de servicio");
+  const [regLocal, setRegLocal] = useState<string>("Chapinero");
   const [showRegPassword, setShowRegPassword] = useState(false);
   
   // General State
@@ -27,146 +42,160 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   const [successMessage, setSuccessMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleLoginSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setSuccessMessage("");
-    setIsLoading(true);
+  // Initialize registry in localStorage on load
+  useEffect(() => {
+    const data = localStorage.getItem("lopez_gracia_user_registry");
+    if (!data) {
+      localStorage.setItem("lopez_gracia_user_registry", JSON.stringify(DEFAULT_USERS));
+    }
+  }, []);
 
+  const getRegisteredUsers = (): RegisteredUser[] => {
+    const data = localStorage.getItem("lopez_gracia_user_registry");
+    if (!data) return DEFAULT_USERS;
     try {
-      const emailInput = loginUsername.trim();
-      const passwordInput = loginPassword;
-
-      if (!emailInput || !passwordInput) {
-        setError("Por favor ingresa tu correo y contraseña.");
-        setIsLoading(false);
-        return;
-      }
-
-      if (isSupabaseConfigured && supabase) {
-        const { data, error: authError } = await supabase.auth.signInWithPassword({
-          email: emailInput,
-          password: passwordInput,
-        });
-
-        if (authError || !data.session) {
-          setError("Correo o contraseña incorrectos.");
-          setIsLoading(false);
-          return;
-        }
-
-        const { data: perfil, error: perfilError } = await supabase
-          .from("usuarios")
-          .select("id, nombre, role, local_id, locales(nombre)")
-          .eq("id", data.session.user.id)
-          .single();
-
-        if (perfilError || !perfil) {
-          console.warn("Perfil no encontrado aún, usando datos de auth metadata.", perfilError);
-          const rawName = data.session.user.user_metadata?.nombre || data.session.user.email || "Usuario";
-          onLoginSuccess("Asistente de servicio", rawName, "Chapinero");
-        } else {
-          const localNombre = (perfil.locales as any)?.nombre || "Chapinero";
-          onLoginSuccess(perfil.role as UserRole, perfil.nombre, localNombre);
-        }
-      } else {
-        // Fallback para entorno demo si Supabase aún no está enlazado
-        if (emailInput.toLowerCase().includes("gerente") || emailInput.toLowerCase().includes("admin")) {
-          onLoginSuccess("Admin" as UserRole, "Gerente de Administración", "Chapinero");
-        } else if (emailInput.toLowerCase().includes("lider")) {
-          onLoginSuccess("Lider" as UserRole, "Colaborador Líder", "Chapinero");
-        } else {
-          onLoginSuccess("Asistente de servicio" as UserRole, emailInput.split("@")[0] || "Colaborador Chapinero", "Chapinero");
-        }
-      }
-    } catch (err: any) {
-      setError(err.message || "Error al iniciar sesión.");
-    } finally {
-      setIsLoading(false);
+      const parsed: RegisteredUser[] = JSON.parse(data);
+      // Normalizar roles antiguos si existen
+      return parsed.map(u => ({
+        ...u,
+        role: u.role === "Lider de punto" ? "Líder operador" : u.role
+      }));
+    } catch (e) {
+      return DEFAULT_USERS;
     }
   };
 
-  const handleRegisterSubmit = async (e: React.FormEvent) => {
+  const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setSuccessMessage("");
     setIsLoading(true);
 
-    // TODO: confirmar con el cliente si el self-registro debe deshabilitarse o ser gestionado solo por un Admin.
-    try {
-      const emailInput = regEmail.trim();
-      const passwordInput = regPassword;
-      const nameInput = regUsername.trim();
+    setTimeout(() => {
+      const inputName = loginUsername.trim();
+      const inputPass = loginPassword;
 
-      if (!emailInput || !passwordInput || !nameInput) {
-        setError("Por favor completa nombre, correo y contraseña.");
+      if (!inputName || !inputPass) {
+        setError("Por favor completa todos los campos.");
         setIsLoading(false);
         return;
       }
 
-      if (passwordInput.length < 6) {
-        setError("La contraseña debe tener al menos 6 caracteres.");
-        setIsLoading(false);
+      // 1. Compatibilidad hacia atrás / Accesos rápidos predeterminados
+      if (inputName.toLowerCase() === "colaborador@lopezygracia.com" && inputPass === "tienda") {
+        onLoginSuccess("colaborador", "Colaborador Chapinero", "Chapinero");
+        return;
+      }
+      if (inputName.toLowerCase() === "gerente@lopezygracia.com" && inputPass === "admin") {
+        onLoginSuccess("gerente", "Gerente de Administración", "Chapinero");
         return;
       }
 
-      if (isSupabaseConfigured && supabase) {
-        const { error: signUpError } = await supabase.auth.signUp({
-          email: emailInput,
-          password: passwordInput,
-          options: {
-            data: {
-              nombre: nameInput,
-            },
-          },
-        });
+      // 2. Comprobar contra registro de usuarios (localStorage)
+      const users = getRegisteredUsers();
+      const matchedUser = users.find(
+        u => u.nombre.toLowerCase() === inputName.toLowerCase() && u.password === inputPass
+      );
 
-        if (signUpError) {
-          setError(signUpError.message);
-          setIsLoading(false);
-          return;
-        }
-
-        setSuccessMessage(`¡Usuario "${nameInput}" registrado con éxito! Por favor ingresa con tus credenciales.`);
-        setLoginUsername(emailInput);
-        setLoginPassword("");
-        setActiveTab("login");
+      if (matchedUser) {
+        onLoginSuccess(matchedUser.role as UserRole, matchedUser.nombre, matchedUser.local || "Chapinero");
       } else {
-        setSuccessMessage(`¡Usuario "${nameInput}" creado en modo local! Ahora puedes ingresar.`);
-        setLoginUsername(emailInput);
-        setLoginPassword(passwordInput);
-        setActiveTab("login");
+        setError("Usuario o contraseña incorrectos. Verifica tus datos o crea un usuario nuevo.");
+        setIsLoading(false);
       }
-    } catch (err: any) {
-      setError(err.message || "Error al registrar el usuario.");
-    } finally {
+    }, 600);
+  };
+
+  const handleRegisterSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setSuccessMessage("");
+    setIsLoading(true);
+
+    setTimeout(() => {
+      const usernameInput = regUsername.trim();
+      const passwordInput = regPassword;
+
+      if (!usernameInput || !passwordInput) {
+        setError("Por favor completa todos los campos para el registro.");
+        setIsLoading(false);
+        return;
+      }
+
+      if (passwordInput.length < 3) {
+        setError("La contraseña debe tener al menos 3 caracteres.");
+        setIsLoading(false);
+        return;
+      }
+
+      const users = getRegisteredUsers();
+      const exists = users.some(u => u.nombre.toLowerCase() === usernameInput.toLowerCase());
+
+      if (exists) {
+        setError("El nombre de usuario ya está registrado. Por favor, intenta con otro.");
+        setIsLoading(false);
+        return;
+      }
+
+      // Guardar el nuevo usuario
+      const newUser: RegisteredUser = {
+        nombre: usernameInput,
+        cedula: regCedula.trim(),
+        password: passwordInput,
+        role: regRole,
+        local: regLocal
+      };
+
+      const updatedUsers = [...users, newUser];
+      localStorage.setItem("lopez_gracia_user_registry", JSON.stringify(updatedUsers));
+
+      setSuccessMessage(`¡Usuario "${usernameInput}" (C.C. ${regCedula || 'N/A'}) registrado con éxito como ${regRole} en el local "${regLocal}"! Ahora puedes iniciar sesión.`);
+      
+      // Limpiar campos y cambiar de pestaña
+      setLoginUsername(usernameInput);
+      setLoginPassword("");
+      setRegUsername("");
+      setRegCedula("");
+      setRegPassword("");
+      setActiveTab("login");
       setIsLoading(false);
-    }
+    }, 500);
+  };
+
+  const handleQuickLogin = (role: UserRole) => {
+    setIsLoading(true);
+    setTimeout(() => {
+      if (role === "colaborador") {
+        onLoginSuccess("colaborador", "Colaborador Demo (Acceso Rápido)", "Chapinero");
+      } else if (role === "gerente") {
+        onLoginSuccess("gerente", "Gerente Demo (Acceso Rápido)", "Chapinero");
+      } else if (role === "Líder operador" || role === "Lider de punto" || role === "Lider operador") {
+        onLoginSuccess("Líder operador", "Líder Operador (Acceso Rápido)", "Chapinero");
+      } else {
+        onLoginSuccess("Asistente de Servicio", "Asistente de Servicio (Acceso Rápido)", "Chapinero");
+      }
+    }, 400);
   };
 
   return (
     <div className="min-h-screen bg-[#F5F2EB] flex flex-col items-center justify-center p-4 selection:bg-brand-accent/10 relative">
-      {/* Background decoration */}
+      {/* Soft technical grid pattern */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#e4e4e7_1px,transparent_1px),linear-gradient(to_bottom,#e4e4e7_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] opacity-20 pointer-events-none" />
 
       <div className="w-full max-w-md relative z-10 my-8 space-y-6">
         {/* Brand Header */}
-        <div className="text-center flex flex-col items-center">
-          <div className="bg-white border border-[#1C2E24]/10 p-5 rounded-[2rem] shadow-md transition-all hover:scale-[1.02] duration-200">
-            <Logo size="lg" className="text-[#1C2E24]" />
+        <div className="text-center flex flex-col items-center select-none">
+          <div className="py-2 px-4 transition-transform hover:scale-[1.02] duration-200">
+            <Logo size="xl" className="text-[#1C2E24]" />
           </div>
-          <p className="text-[10px] text-[#1C2E24]/50 font-black tracking-[0.25em] uppercase mt-4">
+          <p className="text-[11px] text-[#1C2E24]/60 font-black tracking-[0.28em] uppercase mt-3">
             Arroz con leche & Cremosos
           </p>
-          <div className="h-[1.5px] w-16 bg-[#1E3E30]/20 mx-auto mt-3.5" />
-          <h2 className="text-xs font-black text-[#1C2E24]/70 uppercase tracking-widest mt-3.5">
-            Módulo Conciliador de Caja
-          </h2>
         </div>
 
         {/* Card Container */}
         <div className="bg-white border border-[#1C2E24]/10 rounded-3xl shadow-xl overflow-hidden">
-          {/* Navigation Tab Headers */}
+          {/* Custom Navigation Tab Headers */}
           <div className="flex border-b border-zinc-100 bg-zinc-50/50 p-2 gap-1.5">
             <button
               onClick={() => {
@@ -217,16 +246,16 @@ export default function Login({ onLoginSuccess }: LoginProps) {
               <form onSubmit={handleLoginSubmit} className="space-y-5">
                 <div>
                   <label className="block text-[10px] font-black text-[#1C2E24]/60 uppercase tracking-widest mb-2">
-                    Correo Electrónico
+                    Usuario o Correo
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-zinc-400">
-                      <Mail className="w-4.5 h-4.5" />
+                      <User className="w-4.5 h-4.5" />
                     </span>
                     <input
-                      type="email"
+                      type="text"
                       required
-                      placeholder="ejemplo@lopezygracia.local"
+                      placeholder="Tu nombre registrado o demo"
                       value={loginUsername}
                       onChange={(e) => setLoginUsername(e.target.value)}
                       className="w-full pl-11 pr-4 py-3 bg-zinc-50/50 border border-zinc-200 focus:border-[#1E3E30] focus:bg-white rounded-xl text-[#1C2E24] placeholder-zinc-400 text-sm font-semibold outline-none transition-all"
@@ -265,7 +294,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                   disabled={isLoading}
                   className="w-full py-3.5 bg-[#1E3E30] hover:bg-[#1E3E30]/90 text-white font-black tracking-widest text-xs uppercase rounded-2xl cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-[#1E3E30]/10 hover:shadow-lg transition-all hover:-translate-y-0.5 duration-200"
                 >
-                  {isLoading ? "Autenticando..." : "Ingresar"}
+                  {isLoading ? "Iniciando sesión..." : "Ingresar al Sistema"}
                 </button>
               </form>
             ) : (
@@ -281,7 +310,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                     <input
                       type="text"
                       required
-                      placeholder="Ej. María López"
+                      placeholder="Ej. Juan Pérez"
                       value={regUsername}
                       onChange={(e) => setRegUsername(e.target.value)}
                       className="w-full pl-11 pr-4 py-2.5 bg-zinc-50/50 border border-zinc-200 focus:border-[#1E3E30] focus:bg-white rounded-xl text-[#1C2E24] placeholder-zinc-400 text-sm font-semibold outline-none transition-all"
@@ -291,26 +320,65 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 
                 <div>
                   <label className="block text-[10px] font-black text-[#1C2E24]/60 uppercase tracking-widest mb-1.5">
-                    Correo Electrónico
+                    Número de Cédula (C.C.)
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-zinc-400">
-                      <Mail className="w-4.5 h-4.5" />
+                      <FileText className="w-4.5 h-4.5" />
                     </span>
                     <input
-                      type="email"
+                      type="text"
                       required
-                      placeholder="ejemplo@lopezygracia.local"
-                      value={regEmail}
-                      onChange={(e) => setRegEmail(e.target.value)}
-                      className="w-full pl-11 pr-4 py-2.5 bg-zinc-50/50 border border-zinc-200 focus:border-[#1E3E30] focus:bg-white rounded-xl text-[#1C2E24] placeholder-zinc-400 text-sm font-semibold outline-none transition-all"
+                      placeholder="Ej. 1020730746"
+                      value={regCedula}
+                      onChange={(e) => setRegCedula(e.target.value)}
+                      className="w-full pl-11 pr-4 py-2.5 bg-zinc-50/50 border border-zinc-200 focus:border-[#1E3E30] focus:bg-white rounded-xl text-[#1C2E24] placeholder-zinc-400 text-sm font-semibold outline-none transition-all font-numeric"
                     />
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-[10px] font-black text-[#1C2E24]/60 uppercase tracking-widest mb-2">
-                    Contraseña (mínimo 6 caracteres)
+                    Rol en Punto de Venta
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={regRole}
+                      onChange={(e) => setRegRole(e.target.value as UserRole)}
+                      className="w-full px-4 py-3 bg-zinc-50/50 border border-zinc-200 focus:border-[#1E3E30] focus:bg-white rounded-xl text-[#1C2E24] text-sm font-semibold outline-none cursor-pointer appearance-none transition-all"
+                    >
+                      <option value="Líder operador">Líder operador</option>
+                      <option value="Asistente de Servicio">Asistente de Servicio</option>
+                      <option value="Líder de pastelería">Líder de pastelería</option>
+                      <option value="Auxiliar de pastelería">Auxiliar de pastelería</option>
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-[#1C2E24]/60">
+                      <ChevronRight className="w-4 h-4 transform rotate-90" />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black text-[#1C2E24]/60 uppercase tracking-widest mb-2">
+                    Local / Punto de Venta
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={regLocal}
+                      onChange={(e) => setRegLocal(e.target.value)}
+                      className="w-full px-4 py-3 bg-zinc-50/50 border border-zinc-200 focus:border-[#1E3E30] focus:bg-white rounded-xl text-[#1C2E24] text-sm font-semibold outline-none cursor-pointer appearance-none transition-all"
+                    >
+                      <option value="Chapinero">Chapinero</option>
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-[#1C2E24]/60">
+                      <ChevronRight className="w-4 h-4 transform rotate-90" />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black text-[#1C2E24]/60 uppercase tracking-widest mb-2">
+                    Contraseña
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-zinc-400">
@@ -319,7 +387,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                     <input
                       type={showRegPassword ? "text" : "password"}
                       required
-                      placeholder="••••••••"
+                      placeholder="Elige una contraseña"
                       value={regPassword}
                       onChange={(e) => setRegPassword(e.target.value)}
                       className="w-full pl-11 pr-11 py-3 bg-zinc-50/50 border border-zinc-200 focus:border-[#1E3E30] focus:bg-white rounded-xl text-[#1C2E24] placeholder-zinc-400 text-sm font-semibold outline-none transition-all"
@@ -339,12 +407,75 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                   disabled={isLoading}
                   className="w-full py-3.5 bg-[#FF5C35] hover:bg-[#E54B24] text-white font-black tracking-widest text-xs uppercase rounded-2xl cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-[#FF5C35]/10 hover:shadow-lg transition-all hover:-translate-y-0.5 duration-200"
                 >
-                  {isLoading ? "Registrando..." : "Crear Usuario en Supabase"}
+                  {isLoading ? "Creando usuario..." : "Registrar y Crear Usuario"}
                 </button>
               </form>
             )}
+
+            {/* Quick Demo Access (Visible only in non-production) */}
+            {!(import.meta as any).env?.PROD && (
+              <div className="space-y-4 pt-2">
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-zinc-100" />
+                  </div>
+                  <div className="relative flex justify-center text-[10px] uppercase font-black">
+                    <span className="bg-white px-3 text-[#1C2E24]/40 tracking-widest">
+                      Acceso Demo Rápido
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin("Líder operador")}
+                    className="flex flex-col items-center justify-center p-3 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200/50 rounded-2xl group transition-all text-center cursor-pointer duration-150"
+                  >
+                    <User className="w-5 h-5 text-[#1C2E24]/70 group-hover:scale-110 transition-transform mb-1" />
+                    <span className="text-[10px] font-black text-[#1C2E24] uppercase tracking-wide">Líder</span>
+                    <span className="text-[8px] font-bold text-[#1C2E24]/50 uppercase mt-0.5">Operador</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin("Asistente de Servicio")}
+                    className="flex flex-col items-center justify-center p-3 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200/50 rounded-2xl group transition-all text-center cursor-pointer duration-150"
+                  >
+                    <User className="w-5 h-5 text-[#1C2E24]/70 group-hover:scale-110 transition-transform mb-1" />
+                    <span className="text-[10px] font-black text-[#1C2E24] uppercase tracking-wide">Asistente</span>
+                    <span className="text-[8px] font-bold text-[#1C2E24]/50 uppercase mt-0.5">Servicio</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin("gerente")}
+                    className="flex flex-col items-center justify-center p-3 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200/50 rounded-2xl group transition-all text-center cursor-pointer duration-150"
+                  >
+                    <ShieldCheck className="w-5 h-5 text-[#1C2E24]/70 group-hover:scale-110 transition-transform mb-1" />
+                    <span className="text-[10px] font-black text-[#1C2E24] uppercase tracking-wide">Gerente</span>
+                    <span className="text-[8px] font-bold text-[#1C2E24]/50 uppercase mt-0.5">Admin</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
+
+        {/* Credentials hints (Non-prod) */}
+        {!(import.meta as any).env?.PROD && (
+          <div className="text-center text-[10px] text-[#1C2E24]/50 space-y-1 font-bold">
+            <p className="uppercase tracking-wider">
+              Líder Operador: <span className="text-[#1C2E24] font-numeric bg-white border border-zinc-200/60 px-1.5 py-0.5 rounded">Colaborador Lider</span> / <span className="text-[#1C2E24] font-numeric bg-white border border-zinc-200/60 px-1.5 py-0.5 rounded">tienda</span>
+            </p>
+            <p className="uppercase tracking-wider">
+              Asistente: <span className="text-[#1C2E24] font-numeric bg-white border border-zinc-200/60 px-1.5 py-0.5 rounded">Colaborador Auxiliar</span> / <span className="text-[#1C2E24] font-numeric bg-white border border-zinc-200/60 px-1.5 py-0.5 rounded">tienda</span>
+            </p>
+            <p className="uppercase tracking-wider">
+              Gerente: <span className="text-[#1C2E24] font-numeric bg-white border border-zinc-200/60 px-1.5 py-0.5 rounded">Gerente</span> / <span className="text-[#1C2E24] font-numeric bg-white border border-zinc-200/60 px-1.5 py-0.5 rounded">admin</span>
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

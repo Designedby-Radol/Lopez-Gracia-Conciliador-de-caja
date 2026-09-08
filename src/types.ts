@@ -1,28 +1,18 @@
 export type UserRole = 
-  | "Asistente de servicio"
-  | "Lider"
-  | "Auxiliar"
-  | "Admin"
   | "colaborador" 
   | "gerente" 
-  | "Lider de punto" 
   | "Líder operador" 
+  | "Lider operador" 
   | "Líder de pastelería" 
   | "Lider de pasteleria" 
   | "Auxiliar de pastelería" 
   | "Asistente de pasteleria" 
   | "Asistente de Servicio" 
+  | "Asistente de servicio" 
   | "Asistente de servicio tiempo completo (TC)" 
   | "Asistente de servicio medio tiempo (MT)" 
-  | "Aux de Venta";
-
-export interface AuthUser {
-  id: string;        // uuid de auth.users / public.usuarios
-  nombre: string;
-  role: "Asistente de servicio" | "Lider" | "Auxiliar" | "Admin" | string;
-  localId: string;   // uuid de locales
-  localNombre: string;
-}
+  | "Aux de Venta"
+  | "Lider de punto"; // Retrocompatibilidad
 
 export interface User {
   uid: string;
@@ -41,12 +31,9 @@ export interface CierreCaja {
   transferenciasCierre: number;
   propinas: number;
   novedades: string;
-  estado: "Pendiente por Cuadrar" | "Cuadrado" | "Con Descuadre" | "Anulado";
+  estado: "Pendiente por Cuadrar" | "Cuadrado";
   createdAt: string; // ISO string or timestamp
-  colaboradorId?: string;
-  colaboradorNombre?: string;
-  localId?: string;
-  localNombre?: string;
+  colaboradorNombre?: string; // Nombre del colaborador que realiza el cierre
   
   // POS Values (filled during auditing)
   efectivoPOS?: number;
@@ -64,9 +51,7 @@ export interface CierreCaja {
   difTransferencias?: number;
 
   // Política de Descuadres (60% Líder / 40% Auxiliares)
-  liderId?: string;
   liderNombre?: string;
-  auxiliaresIds?: string[];
   auxiliaresNombres?: string[];
   descuadreLider?: number;
   descuadreAuxiliar?: number;
@@ -74,8 +59,6 @@ export interface CierreCaja {
   // Audit Meta
   auditadoPor?: string;
   auditadoAt?: string;
-  anuladoPor?: string;
-  anuladoAt?: string;
 }
 
 export interface POSReportTemplate {

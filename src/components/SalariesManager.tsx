@@ -2055,11 +2055,10 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                           onChange={(e: any) => updateConfig(member.nombre, "role", e.target.value)}
                           className="w-full bg-zinc-50 border border-zinc-300 p-2 font-bold rounded-lg outline-none cursor-pointer focus:bg-white disabled:opacity-60 disabled:cursor-not-allowed"
                         >
-                          <option value="Líder de pastelería">Líder de pastelería</option>
-                          <option value="Auxiliar de pastelería">Auxiliar de pastelería</option>
                           <option value="Líder operador">Líder operador</option>
                           <option value="Asistente de Servicio">Asistente de Servicio</option>
-                          <option value="Lider de punto">Líder de Punto</option>
+                          <option value="Líder de pastelería">Líder de pastelería</option>
+                          <option value="Auxiliar de pastelería">Auxiliar de pastelería</option>
                         </select>
                       </div>
 

@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-bg: #F5F2EB;
+  --color-brand-bg: #F8F9FA;
   --color-brand-ink: #1C2E24;
   --color-brand-green: #1E3E30;
   --color-brand-green-light: #E8F3EE;
@@ -18,14 +18,43 @@
 }
 
 @layer base {
+  * {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-feature-settings: 'cv02' 1, 'cv03' 1, 'cv04' 1, 'cv11' 1, 'tnum' 1;
+  }
   body {
-    background-color: #F5F2EB;
+    background-color: #F8F9FA;
     color: #1C2E24;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.01em;
   }
 }
 
-/* Custom keyframes for processing animations if needed */
+/* Numeric display helper class for modern crisp figures */
+.font-numeric {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  letter-spacing: -0.02em;
+}
+
+/* Custom scrollbar for modern sleek aesthetic */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(28, 46, 36, 0.12);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(28, 46, 36, 0.25);
+}
+
+/* Custom keyframes for processing animations */
 @keyframes loading {
   0% { transform: translateX(-100%); }
   50% { transform: translateX(100%); }
@@ -35,4 +64,6 @@
 .animate-loading {
   animation: loading 2.2s infinite ease-in-out;
 }
+
+
 

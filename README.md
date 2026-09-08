@@ -1,34 +1,20 @@
-# 🇨🇴 López & Gracia - Sistema Integrado de Conciliación de Caja, Auditoría POS y Nómina
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
+</div>
 
-Sistema web integral de conciliación de caja, auditoría de reportes POS mediante Inteligencia Artificial (Google Gemini AI), control multitienda y liquidación de nómina según la legislación laboral de Colombia.
+# Run and deploy your AI Studio app
 
-## 📘 Documentación Completa
+This contains everything you need to run your app locally.
 
-Hemos preparado un documento de especificación y arquitectura detallado para usuarios **Técnicos 🔧** y **No Técnicos 👤**:
+View your app in AI Studio: https://ai.studio/apps/095959f8-c649-42d9-93aa-c18289008456
 
-👉 **[Ver Documentación Completa del Producto (DOCUMENTACION.md)](./DOCUMENTACION.md)**
+## Run Locally
 
----
+**Prerequisites:**  Node.js
 
-## 🛠️ Tecnologías Principales
 
-- **Frontend**: React 19, TypeScript, Tailwind CSS v4, Lucide Icons, Motion.
-- **Backend / API**: Node.js, Express, esbuild, tsx.
-- **Inteligencia Artificial**: Google Gemini API (`@google/genai`) para OCR y análisis de reportes POS/PDF.
-- **Persistencia**: Google Cloud Firestore (Firebase) con estrategia Offline-First (IndexedDB / LocalStorage).
-- **Reportabilidad**: jsPDF (exportación a PDF) y SheetJS/XLSX (exportación a Excel).
-
----
-
-## 🚀 Comandos de Ejecución
-
-```bash
-# Servidor de Desarrollo (Puerto 3000)
-npm run dev
-
-# Compilación para Producción
-npm run build
-
-# Iniciar servidor de Producción
-npm start
-```
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
+   `npm run dev`

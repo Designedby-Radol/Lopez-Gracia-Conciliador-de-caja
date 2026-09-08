@@ -1,0 +1,107 @@
+{
+  "entities": {
+    "CierreCaja": {
+      "title": "CierreCaja",
+      "description": "Registro diario de cierre de caja física reportado por colaboradores y auditado por gerencia",
+      "type": "object",
+      "properties": {
+        "fecha": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "Fecha del cierre de caja diario"
+        },
+        "efectivoCierre": {
+          "type": "number",
+          "description": "Efectivo total reportado en el arqueo físico de caja"
+        },
+        "datafonoCierre": {
+          "type": "number",
+          "description": "Total reportado en vouchers de tarjetas/datáfono físico"
+        },
+        "justoCierre": {
+          "type": "number",
+          "description": "Ventas reportadas pagadas por la app Justo"
+        },
+        "rappiCierre": {
+          "type": "number",
+          "description": "Ventas reportadas pagadas por Rappi"
+        },
+        "propinas": {
+          "type": "number",
+          "description": "Total de propinas recolectadas en el día"
+        },
+        "novedades": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Observaciones o novedades reportadas durante el turno"
+        },
+        "estado": {
+          "type": "string",
+          "enum": ["Pendiente por Cuadrar", "Cuadrado"],
+          "description": "Estado de la conciliación del cierre diario"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Fecha y hora de creación del registro"
+        },
+        "efectivoPOS": {
+          "type": "number",
+          "description": "Ventas en efectivo reportadas por el sistema POS de López & Gracia"
+        },
+        "tarjetasPOS": {
+          "type": "number",
+          "description": "Ventas en tarjeta reportadas por el sistema POS de López & Gracia"
+        },
+        "justoPOS": {
+          "type": "number",
+          "description": "Ventas de Justo registradas por el sistema POS"
+        },
+        "rappiPOS": {
+          "type": "number",
+          "description": "Ventas de Rappi registradas por el sistema POS"
+        },
+        "difEfectivo": {
+          "type": "number",
+          "description": "Diferencia de efectivo (Cierre físico - POS)"
+        },
+        "difTarjetas": {
+          "type": "number",
+          "description": "Diferencia de tarjetas (Arqueo físico - POS)"
+        },
+        "difJusto": {
+          "type": "number",
+          "description": "Diferencia en ventas de Justo (Cierre - POS)"
+        },
+        "difRappi": {
+          "type": "number",
+          "description": "Diferencia en ventas de Rappi (Cierre - POS)"
+        },
+        "auditadoPor": {
+          "type": "string",
+          "description": "Nombre o cargo del gerente que realizó el cuadre de caja"
+        },
+        "auditadoAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Fecha y hora de la auditoría y cuadre"
+        }
+      },
+      "required": [
+        "fecha",
+        "efectivoCierre",
+        "datafonoCierre",
+        "justoCierre",
+        "rappiCierre",
+        "propinas",
+        "estado"
+      ]
+    }
+  },
+  "firestore": {
+    "cierres_caja/{cierreId}": {
+      "schema": "CierreCaja",
+      "description": "Registros de cierres de caja cargados por colaboradores y procesados por el auditor"
+    }
+  }
+}

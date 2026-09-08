@@ -1,6 +1,6 @@
 {
-  "name": "Conciliador de Caja",
-  "description": "Sistema de conciliación de caja, auditoría de reportes POS y nómina colombiana para López & Gracia con integración Supabase PostgreSQL.",
+  "name": "prueba 2",
+  "description": "Sistema de conciliación de caja y auditoría de reportes POS para López \u0026 Gracia con integración Firebase.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

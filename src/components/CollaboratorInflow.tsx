@@ -24,7 +24,10 @@ import {
   Lock,
   Key,
   Eye,
-  EyeOff
+  EyeOff,
+  Package,
+  ClipboardCheck,
+  Pencil
 } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 // @ts-ignore
@@ -32,6 +35,8 @@ import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { dbAdapter } from "../db/dbAdapter";
 import { CierreCaja } from "../types";
 import Logo from "./Logo";
+import InventoryClosure from "./InventoryClosure";
+import OperationalChecklist from "./OperationalChecklist";
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -315,8 +320,10 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
 
 
 
+  const isLeaderRole = role === "Líder operador" || role === "Lider operador" || role === "Lider de punto" || (role && role.toLowerCase().includes("lider"));
+
   // States for team selection of the shift
-  const [liderNombre, setLiderNombre] = useState(role === "Lider de punto" ? username : "");
+  const [liderNombre, setLiderNombre] = useState(isLeaderRole ? username : "");
   const [selectedAuxiliares, setSelectedAuxiliares] = useState<string[]>([]);
 
   // Computed registered users from the same local
@@ -326,8 +333,8 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
     if (!data) {
       users = [
         { nombre: "Gerente", role: "gerente", local: "Chapinero" },
-        { nombre: "Colaborador Lider", role: "Lider de punto", local: "Chapinero" },
-        { nombre: "Colaborador Auxiliar", role: "Aux de Venta", local: "Chapinero" }
+        { nombre: "Colaborador Lider", role: "Líder operador", local: "Chapinero" },
+        { nombre: "Colaborador Auxiliar", role: "Asistente de Servicio", local: "Chapinero" }
       ];
     } else {
       try {
@@ -340,26 +347,70 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
     // Filter by the current local
     const sameLocalUsers = users.filter(u => (u.local || "Chapinero").toLowerCase() === (local || "Chapinero").toLowerCase());
     
-    const leaders = sameLocalUsers.filter(u => u.role === "Lider de punto");
-    const assistants = sameLocalUsers.filter(u => u.role === "Aux de Venta");
+    const leaders = sameLocalUsers.filter(u => 
+      u.role === "Líder operador" || u.role === "Lider operador" || u.role === "Lider de punto" || (u.role && u.role.toLowerCase().includes("lider"))
+    );
+    const assistants = sameLocalUsers.filter(u => 
+      u.role !== "gerente" && !leaders.some(l => l.nombre === u.nombre)
+    );
     
     return { leaders, assistants };
   }, [local]);
 
   // Set initial liderNombre based on roles and available leaders
   useEffect(() => {
-    if (role === "Lider de punto") {
+    if (isLeaderRole) {
       setLiderNombre(username);
     } else if (localRegisteredUsers.leaders.length > 0) {
       setLiderNombre(localRegisteredUsers.leaders[0].nombre);
     }
-  }, [role, username, localRegisteredUsers.leaders]);
+  }, [isLeaderRole, username, localRegisteredUsers.leaders]);
 
-  const [activeTab, setActiveTab] = useState<"register" | "history" | "password">("register");
+  const [activeTab, setActiveTab] = useState<"register" | "inventory" | "checklist" | "password">("register");
+  const [cajaSubTab, setCajaSubTab] = useState<"form" | "history">("form");
   const [history, setHistory] = useState<CierreCaja[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filterUser, setFilterUser] = useState<"me" | "all">("me");
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const startEditingCierre = (cierre: CierreCaja) => {
+    if (cierre.estado === "Cuadrado") {
+      alert("Este cierre de caja ya ha sido auditado y conciliado ('Cuadrado'), por lo cual no puede ser modificado.");
+      return;
+    }
+    setEditingId(cierre.id);
+    setFecha(cierre.fecha);
+    setColaboradorNombre(cierre.colaboradorNombre || username);
+    setLiderNombre(cierre.liderNombre || username);
+    setSelectedAuxiliares(cierre.auxiliaresNombres || []);
+    setEfectivo(cierre.efectivoCierre ? new Intl.NumberFormat("es-CO").format(cierre.efectivoCierre) : "");
+    setDatafono(cierre.datafonoCierre ? new Intl.NumberFormat("es-CO").format(cierre.datafonoCierre) : "");
+    setJusto(cierre.justoCierre ? new Intl.NumberFormat("es-CO").format(cierre.justoCierre) : "0");
+    setRappi(cierre.rappiCierre ? new Intl.NumberFormat("es-CO").format(cierre.rappiCierre) : "0");
+    setTransferencias(cierre.transferenciasCierre ? new Intl.NumberFormat("es-CO").format(cierre.transferenciasCierre) : "0");
+    setPropinas(cierre.propinas ? new Intl.NumberFormat("es-CO").format(cierre.propinas) : "");
+    setNovedades(cierre.novedades || "");
+    setSuccessData(null);
+    setActiveTab("register");
+    setCajaSubTab("form");
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setFecha(getTodayString());
+    setEfectivo("");
+    setDatafono("");
+    setJusto("0");
+    setRappi("0");
+    setTransferencias("0");
+    setPropinas("");
+    setNovedades("");
+  };
+
+  const existingClosureForSelectedDate = useMemo(() => {
+    return history.find(c => c.fecha === fecha && c.id !== editingId);
+  }, [history, fecha, editingId]);
 
   // Estados para cambio de contraseña
   const [currentPassword, setCurrentPassword] = useState("");
@@ -446,7 +497,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
     }, 600);
   };
 
-  const canSeeAllTeam = role === "Lider de punto" || role === "colaborador";
+  const canSeeAllTeam = isLeaderRole || role === "colaborador";
 
   const fetchHistory = async () => {
     setIsLoadingHistory(true);
@@ -506,10 +557,10 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
     e.preventDefault();
     if (!fecha) return;
 
-    // Verificar si ya existe un cierre de caja para esta fecha
-    const yaExiste = history.some(c => c.fecha === fecha);
-    if (yaExiste) {
-      alert(`Ya existe un cierre de caja registrado para el día ${fecha}. Solo está permitido un cierre de caja por fecha.`);
+    // Verificar si ya existe un cierre de caja para esta fecha (si no estamos editando)
+    const closureForDate = history.find(c => c.fecha === fecha);
+    if (closureForDate && closureForDate.id !== editingId) {
+      alert(`Ya existe un cierre de caja registrado para el día ${fecha}. Si necesita corregirlo, puede editar el cierre existente.`);
       return;
     }
 
@@ -531,21 +582,35 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
         transferenciasCierre: cleanNum(transferencias),
         propinas: cleanNum(propinas),
         novedades: novedades.trim(),
-        estado: "Pendiente por Cuadrar" as const,
         liderNombre: liderNombre.trim() || username,
         auxiliaresNombres: selectedAuxiliares,
-        // POS values initially 0 (to be loaded by Admin via POS report PDF upload)
-        efectivoPOS: 0,
-        tarjetasPOS: 0,
-        justoPOS: 0,
-        rappiPOS: 0,
-        transferenciasPOS: 0,
-        posFileName: "",
       };
 
-      const result = await dbAdapter.saveCierre(payload);
-      setSuccessData(result);
-      fetchHistory(); // Actualizar el historial de inmediato
+      if (editingId) {
+        // Actualizar cierre existente
+        await dbAdapter.updateCierre(editingId, payload);
+        const updatedItem: CierreCaja = {
+          ...(closureForDate || { id: editingId, createdAt: new Date().toISOString(), estado: "Pendiente por Cuadrar" }),
+          ...payload,
+        };
+        setSuccessData(updatedItem);
+        setEditingId(null);
+      } else {
+        // Guardar nuevo cierre
+        const result = await dbAdapter.saveCierre({
+          ...payload,
+          estado: "Pendiente por Cuadrar" as const,
+          efectivoPOS: 0,
+          tarjetasPOS: 0,
+          justoPOS: 0,
+          rappiPOS: 0,
+          transferenciasPOS: 0,
+          posFileName: "",
+        });
+        setSuccessData(result);
+      }
+
+      await fetchHistory(); // Actualizar el historial de inmediato
       
       // Limpiar formulario
       setEfectivo("");
@@ -555,9 +620,9 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
       setTransferencias("0");
       setPropinas("");
       setNovedades("");
-    } catch (error: any) {
-      console.error("Error al guardar cierre de caja:", error);
-      alert(error?.message || "Hubo un error al guardar el cierre en la base de datos.");
+    } catch (error) {
+      console.error("Error al guardar/actualizar cierre de caja:", error);
+      alert("Hubo un error al procesar el cierre. Intente nuevamente.");
     } finally {
       setIsSubmitting(false);
     }
@@ -565,9 +630,17 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
 
   const handleResetForm = () => {
     setSuccessData(null);
+    setEditingId(null);
     setFecha(getTodayString());
     setSelectedAuxiliares([]);
-    if (role === "Lider de punto") {
+    setEfectivo("");
+    setDatafono("");
+    setJusto("0");
+    setRappi("0");
+    setTransferencias("0");
+    setPropinas("");
+    setNovedades("");
+    if (isLeaderRole) {
       setLiderNombre(username);
     } else if (localRegisteredUsers.leaders.length > 0) {
       setLiderNombre(localRegisteredUsers.leaders[0].nombre);
@@ -575,34 +648,36 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
   };
 
   return (
-    <div className="min-h-screen bg-brand-bg text-brand-ink flex flex-col selection:bg-brand-ink/10 relative">
-      {/* Dynamic technical clean line pattern */}
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#e4e4e7_1px,transparent_1px),linear-gradient(to_bottom,#e4e4e7_1px,transparent_1px)] bg-[size:4rem_4rem] opacity-30 pointer-events-none z-0" />
-
+    <div className="min-h-screen bg-[#F8F9FA] text-[#1C2E24] flex flex-col selection:bg-[#1E3E30]/10 relative">
       {/* Barra de Navegación del Colaborador */}
-      <header className="bg-white border-b-2 border-brand-ink py-3 px-6 flex items-center justify-between shadow-sm relative z-10">
-        <div className="flex items-center space-x-4">
-          <div className="bg-white border-2 border-brand-ink p-1.5 shadow-[2px_2px_0px_0px_#1C1917]">
-            <Logo size="sm" className="text-brand-ink" />
+      <header className="bg-white border-b border-slate-200/80 py-3.5 px-6 flex items-center justify-between sticky top-0 z-30 shadow-[0_1px_3px_0_rgba(0,0,0,0.02)]">
+        <div className="flex items-center space-x-3.5">
+          <div className="bg-[#1E3E30]/5 p-2 rounded-xl border border-[#1E3E30]/10 flex items-center justify-center">
+            <Logo size="sm" className="text-[#1E3E30]" />
           </div>
           <div>
-            <p className="text-[9px] text-brand-ink/60 uppercase font-black tracking-[0.15em] leading-none mb-1">
-              Módulo Colaborador
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm font-extrabold tracking-tight text-slate-900">
+                López & Gracia
+              </h1>
+              <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200/50">
+                Punto {local}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 font-medium mt-0.5">
+              Portal Operativo & Ingreso Diario
             </p>
-            <h1 className="text-sm font-black tracking-widest uppercase text-brand-ink leading-none">
-              SIMULADOR DE INGESTA
-            </h1>
           </div>
         </div>
 
-        <div className="flex items-center space-x-4">
-          <div className="hidden md:flex flex-col text-right">
-            <span className="text-xs text-brand-ink font-black uppercase tracking-wide">{username}</span>
-            <span className="text-[9px] font-black text-brand-ink/50 uppercase">Rol: Colaborador (Tienda)</span>
+        <div className="flex items-center space-x-3">
+          <div className="hidden sm:flex flex-col text-right pr-2">
+            <span className="text-xs text-slate-900 font-bold">{username}</span>
+            <span className="text-[11px] font-semibold text-slate-400">Rol: {role}</span>
           </div>
           <button
             onClick={onLogout}
-            className="px-4 py-1.5 bg-brand-ink hover:bg-black text-white text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-[2px_2px_0px_0px_#D4D4D8]"
+            className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 shadow-xs hover:border-slate-300 transition-all cursor-pointer"
           >
             Cerrar Sesión
           </button>
@@ -610,337 +685,106 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
       </header>
 
       {/* Contenedor Principal */}
-      <main className="flex-1 max-w-4xl w-full mx-auto p-4 md:p-8 flex flex-col justify-start relative z-10">
+      <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 md:p-8 flex flex-col justify-start relative z-10">
         
-        {/* Selector de Pestañas Neo-Brutalistas */}
-        <div className="flex flex-col sm:flex-row bg-white border-2 border-brand-ink p-1.5 shadow-[4px_4px_0px_0px_#1C1917] mb-6 relative z-10 gap-1.5">
+        {/* Selector de Pestañas Principal con Alto Contraste */}
+        <div className="flex flex-wrap bg-[#1E3E30] p-1.5 rounded-2xl shadow-md border border-[#163025] mb-6 gap-1.5">
           <button
             type="button"
             onClick={() => {
               setActiveTab("register");
-              setSuccessData(null); // Al volver a registrar, limpiamos el estado de éxito previo si existía
+              setSuccessData(null);
             }}
-            className={`flex-1 py-2.5 text-xs font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center space-x-2 ${
-              activeTab === "register" ? "bg-brand-ink text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.15)]" : "text-brand-ink hover:bg-zinc-100"
+            className={`flex-1 min-w-[130px] py-2.5 px-3.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
+              activeTab === "register"
+                ? "bg-white text-[#1E3E30] shadow-sm font-extrabold"
+                : "text-emerald-100/90 hover:text-white hover:bg-white/15"
             }`}
           >
-            <PlusCircle className="w-4 h-4" />
-            <span>Registrar Cierre de Caja</span>
+            <PlusCircle className={`w-4 h-4 ${activeTab === "register" ? "text-[#1E3E30]" : "text-emerald-300"}`} />
+            <span>Cierre de Caja</span>
           </button>
           <button
             type="button"
             onClick={() => {
-              setActiveTab("history");
-              fetchHistory();
+              setActiveTab("inventory");
             }}
-            className={`flex-1 py-2.5 text-xs font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center space-x-2 ${
-              activeTab === "history" ? "bg-brand-ink text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.15)]" : "text-brand-ink hover:bg-zinc-100"
+            className={`flex-1 min-w-[130px] py-2.5 px-3.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
+              activeTab === "inventory"
+                ? "bg-white text-[#1E3E30] shadow-sm font-extrabold"
+                : "text-emerald-100/90 hover:text-white hover:bg-white/15"
             }`}
           >
-            <History className="w-4 h-4" />
-            <span>Historial de Cierres</span>
+            <Package className={`w-4 h-4 ${activeTab === "inventory" ? "text-amber-600" : "text-amber-300"}`} />
+            <span>Cierre Inventario</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("checklist");
+            }}
+            className={`flex-1 min-w-[130px] py-2.5 px-3.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
+              activeTab === "checklist"
+                ? "bg-white text-[#1E3E30] shadow-sm font-extrabold"
+                : "text-emerald-100/90 hover:text-white hover:bg-white/15"
+            }`}
+          >
+            <ClipboardCheck className={`w-4 h-4 ${activeTab === "checklist" ? "text-emerald-700" : "text-emerald-300"}`} />
+            <span>Checklist Operativo</span>
           </button>
           <button
             type="button"
             onClick={() => {
               setActiveTab("password");
             }}
-            className={`flex-1 py-2.5 text-xs font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center space-x-2 ${
-              activeTab === "password" ? "bg-brand-ink text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.15)]" : "text-brand-ink hover:bg-zinc-100"
+            className={`flex-1 min-w-[130px] py-2.5 px-3.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
+              activeTab === "password"
+                ? "bg-white text-[#1E3E30] shadow-sm font-extrabold"
+                : "text-emerald-100/90 hover:text-white hover:bg-white/15"
             }`}
           >
-            <Lock className="w-4 h-4" />
-            <span>Cambiar Contraseña</span>
+            <Lock className={`w-4 h-4 ${activeTab === "password" ? "text-slate-700" : "text-emerald-300"}`} />
+            <span>Seguridad</span>
           </button>
         </div>
 
-        {activeTab === "history" ? (
-          /* Vista de Historial */
-          <div className="bg-white border-2 border-brand-ink shadow-[6px_6px_0px_0px_#1C1917]">
-            {/* Cabecera de Historial con Filtros */}
-            <div className="border-b-2 border-brand-ink p-6 bg-brand-bg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <h2 className="text-xl font-black text-brand-ink uppercase tracking-tight">Historial de Cierres de Caja</h2>
-                <p className="text-xs text-brand-ink/70 mt-1 font-semibold">
-                  {canSeeAllTeam 
-                    ? "Consulta el registro histórico de los cierres realizados por el equipo y su estado de auditoría."
-                    : "Consulta el registro histórico de tus cierres de caja realizados y su estado de auditoría."}
-                </p>
-              </div>
-
-              {/* Filtro de Usuario */}
-              {canSeeAllTeam ? (
-                <div className="flex bg-white border-2 border-brand-ink p-1 self-stretch sm:self-auto">
-                  <button
-                    type="button"
-                    onClick={() => setFilterUser("me")}
-                    className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider cursor-pointer transition-all ${
-                      filterUser === "me" ? "bg-brand-ink text-white" : "text-brand-ink hover:bg-zinc-100"
-                    }`}
-                  >
-                    Mis Cierres
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFilterUser("all")}
-                    className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider cursor-pointer transition-all ${
-                      filterUser === "all" ? "bg-brand-ink text-white" : "text-brand-ink hover:bg-zinc-100"
-                    }`}
-                  >
-                    Todo el Equipo
-                  </button>
-                </div>
-              ) : (
-                <div className="bg-brand-ink text-white px-3 py-1.5 text-[10px] font-black uppercase tracking-wider border-2 border-brand-ink self-start sm:self-auto shadow-[2px_2px_0px_0px_rgba(0,0,0,0.15)]">
-                  Mis Cierres
-                </div>
-              )}
-            </div>
-
-            {/* Contenido de Historial */}
-            <div className="p-6">
-              {isLoadingHistory ? (
-                <div className="py-12 flex flex-col items-center justify-center text-brand-ink/40">
-                  <Loader2 className="w-8 h-8 animate-spin stroke-2 mb-2 text-brand-ink" />
-                  <span className="text-xs font-black uppercase tracking-widest">Cargando historial...</span>
-                </div>
-              ) : filteredHistory.length === 0 ? (
-                <div className="py-12 flex flex-col items-center justify-center text-center text-brand-ink/40 border-2 border-dashed border-zinc-200">
-                  <Clock className="w-10 h-10 mb-3 stroke-1.5" />
-                  <h3 className="text-sm font-black text-brand-ink uppercase tracking-wider">No se encontraron cierres</h3>
-                  <p className="text-xs text-brand-ink/60 mt-1 max-w-sm">
-                    {filterUser === "me" 
-                      ? "Aún no has registrado ningún cierre de caja con tu usuario." 
-                      : "No hay cierres de caja registrados en el sistema para mostrar."}
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {filteredHistory.map((c) => {
-                    const isExpanded = expandedId === c.id;
-                    const totalCierre = (c.efectivoCierre || 0) + (c.datafonoCierre || 0) + (c.justoCierre || 0) + (c.rappiCierre || 0) + (c.transferenciasCierre || 0);
-                    
-                    return (
-                      <div 
-                        key={c.id} 
-                        className={`border-2 border-brand-ink bg-white transition-all ${
-                          isExpanded ? "shadow-[4px_4px_0px_0px_#1C1917]" : "hover:translate-y-[-1px] hover:shadow-[3px_3px_0px_0px_#1C1917]"
-                        }`}
-                      >
-                        {/* Cabecera del Item */}
-                        <div 
-                          onClick={() => setExpandedId(isExpanded ? null : c.id)}
-                          className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 cursor-pointer hover:bg-brand-bg transition-colors"
-                        >
-                          <div className="flex flex-wrap items-center gap-3">
-                            {/* Fecha */}
-                            <div className="bg-brand-ink text-white px-2.5 py-1 text-xs font-mono font-black border border-brand-ink">
-                              {c.fecha}
-                            </div>
-                            {/* Responsable */}
-                            <div className="text-xs font-bold text-brand-ink flex items-center space-x-1">
-                              <span className="text-brand-ink/50 uppercase text-[9px] font-black tracking-wider">Por:</span>
-                              <span className="font-black uppercase">{c.colaboradorNombre || "Sin nombre"}</span>
-                            </div>
-                            {/* Estado Badge */}
-                            {c.estado === "Cuadrado" ? (
-                              <span className="inline-flex items-center px-2 py-0.5 text-[9px] font-black uppercase tracking-wider bg-emerald-50 border border-emerald-600 text-emerald-800">
-                                <Check className="w-3 h-3 mr-1 stroke-[3]" />
-                                Cuadrado
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-2 py-0.5 text-[9px] font-black uppercase tracking-wider bg-amber-50 border border-amber-500 text-amber-700">
-                                <Clock className="w-3 h-3 mr-1 stroke-[3]" />
-                                Pendiente por Auditar
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center justify-between w-full sm:w-auto sm:space-x-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-zinc-100">
-                            <div className="text-right">
-                              <span className="block text-[8px] font-black text-brand-ink/50 uppercase tracking-widest leading-none mb-1">Total Reportado</span>
-                              <span className="font-mono font-black text-xs text-brand-ink leading-none">{formatCOP(String(totalCierre))}</span>
-                            </div>
-                            <div className="text-brand-ink/60">
-                              {isExpanded ? <ChevronUp className="w-4 h-4 stroke-[2.5]" /> : <ChevronDown className="w-4 h-4 stroke-[2.5]" />}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Detalle Desplegable */}
-                        {isExpanded && (
-                          <div className="border-t-2 border-brand-ink bg-zinc-50 p-4 sm:p-6 space-y-5">
-                            {/* Desglose de Canales */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                              {/* Lado Reporte Físico */}
-                              <div className="bg-white border border-brand-ink p-4 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.05)]">
-                                <h4 className="text-[10px] font-black uppercase tracking-widest text-brand-ink border-b border-brand-ink pb-1.5 mb-3">
-                                  Arqueo Físico Reportado
-                                </h4>
-                                <div className="space-y-2 text-xs font-medium text-brand-ink">
-                                  <div className="flex justify-between">
-                                    <span className="text-brand-ink/60 uppercase text-[10px]">Efectivo:</span>
-                                    <span className="font-mono font-bold">{formatCOP(String(c.efectivoCierre))}</span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-brand-ink/60 uppercase text-[10px]">Datáfono / Vouchers:</span>
-                                    <span className="font-mono font-bold">{formatCOP(String(c.datafonoCierre))}</span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-brand-ink/60 uppercase text-[10px]">Justo App:</span>
-                                    <span className="font-mono font-bold">{formatCOP(String(c.justoCierre))}</span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-brand-ink/60 uppercase text-[10px]">Rappi App:</span>
-                                    <span className="font-mono font-bold">{formatCOP(String(c.rappiCierre))}</span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-brand-ink/60 uppercase text-[10px]">Transferencias:</span>
-                                    <span className="font-mono font-bold">{formatCOP(String(c.transferenciasCierre))}</span>
-                                  </div>
-                                  <div className="border-t border-dashed border-zinc-200 pt-1.5 flex justify-between font-black">
-                                    <span className="uppercase text-[10px]">Propinas Recibidas:</span>
-                                    <span className="font-mono">{formatCOP(String(c.propinas))}</span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Lado Auditoría / POS */}
-                              <div className="bg-white border border-brand-ink p-4 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.05)] flex flex-col justify-between">
-                                <div>
-                                  <h4 className="text-[10px] font-black uppercase tracking-widest text-brand-ink border-b border-brand-ink pb-1.5 mb-3 flex justify-between items-center">
-                                    <span>Auditoría de Ventas</span>
-                                    {c.estado === "Cuadrado" && (
-                                      <span className="text-[8px] bg-emerald-100 text-emerald-800 border border-emerald-500 px-1.5 py-0.2">Aprobado</span>
-                                    )}
-                                  </h4>
-
-                                  {c.estado === "Cuadrado" ? (
-                                    <div className="space-y-2 text-xs font-medium text-brand-ink">
-                                      {/* Comparaciones con discrepancias */}
-                                      <div className="flex justify-between items-center">
-                                        <span className="text-brand-ink/60 uppercase text-[10px]">Efectivo POS / Dif:</span>
-                                        <div className="text-right">
-                                          <span className="font-mono font-bold block">{formatCOP(String(c.efectivoPOS))}</span>
-                                          <span className={`text-[9px] font-black font-mono uppercase ${
-                                            (c.difEfectivo || 0) === 0 ? "text-emerald-600" : (c.difEfectivo || 0) < 0 ? "text-rose-600" : "text-blue-600"
-                                          }`}>
-                                            {(c.difEfectivo || 0) === 0 ? "Sin dif." : `${(c.difEfectivo || 0) > 0 ? "+" : ""}${formatCOP(String(c.difEfectivo))}`}
-                                          </span>
-                                        </div>
-                                      </div>
-
-                                      <div className="flex justify-between items-center">
-                                        <span className="text-brand-ink/60 uppercase text-[10px]">Datáfono POS / Dif:</span>
-                                        <div className="text-right">
-                                          <span className="font-mono font-bold block">{formatCOP(String(c.tarjetasPOS))}</span>
-                                          <span className={`text-[9px] font-black font-mono uppercase ${
-                                            (c.difTarjetas || 0) === 0 ? "text-emerald-600" : (c.difTarjetas || 0) < 0 ? "text-rose-600" : "text-blue-600"
-                                          }`}>
-                                            {(c.difTarjetas || 0) === 0 ? "Sin dif." : `${(c.difTarjetas || 0) > 0 ? "+" : ""}${formatCOP(String(c.difTarjetas))}`}
-                                          </span>
-                                        </div>
-                                      </div>
-
-                                      <div className="flex justify-between items-center">
-                                        <span className="text-brand-ink/60 uppercase text-[10px]">Justo POS / Dif:</span>
-                                        <div className="text-right">
-                                          <span className="font-mono font-bold block">{formatCOP(String(c.justoPOS))}</span>
-                                          <span className={`text-[9px] font-black font-mono uppercase ${
-                                            (c.difJusto || 0) === 0 ? "text-emerald-600" : (c.difJusto || 0) < 0 ? "text-rose-600" : "text-blue-600"
-                                          }`}>
-                                            {(c.difJusto || 0) === 0 ? "Sin dif." : `${(c.difJusto || 0) > 0 ? "+" : ""}${formatCOP(String(c.difJusto))}`}
-                                          </span>
-                                        </div>
-                                      </div>
-
-                                      <div className="flex justify-between items-center">
-                                        <span className="text-brand-ink/60 uppercase text-[10px]">Rappi POS / Dif:</span>
-                                        <div className="text-right">
-                                          <span className="font-mono font-bold block">{formatCOP(String(c.rappiPOS))}</span>
-                                          <span className={`text-[9px] font-black font-mono uppercase ${
-                                            (c.difRappi || 0) === 0 ? "text-emerald-600" : (c.difRappi || 0) < 0 ? "text-rose-600" : "text-blue-600"
-                                          }`}>
-                                            {(c.difRappi || 0) === 0 ? "Sin dif." : `${(c.difRappi || 0) > 0 ? "+" : ""}${formatCOP(String(c.difRappi))}`}
-                                          </span>
-                                        </div>
-                                      </div>
-
-                                      <div className="flex justify-between items-center">
-                                        <span className="text-brand-ink/60 uppercase text-[10px]">Transf. POS / Dif:</span>
-                                        <div className="text-right">
-                                          <span className="font-mono font-bold block">{formatCOP(String(c.transferenciasPOS))}</span>
-                                          <span className={`text-[9px] font-black font-mono uppercase ${
-                                            (c.difTransferencias || 0) === 0 ? "text-emerald-600" : (c.difTransferencias || 0) < 0 ? "text-rose-600" : "text-blue-600"
-                                          }`}>
-                                            {(c.difTransferencias || 0) === 0 ? "Sin dif." : `${(c.difTransferencias || 0) > 0 ? "+" : ""}${formatCOP(String(c.difTransferencias))}`}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div className="flex flex-col items-center justify-center py-6 px-4 text-center bg-zinc-50 border border-dashed border-zinc-200">
-                                      <AlertTriangle className="w-5 h-5 text-amber-500 mb-2 stroke-2" />
-                                      <p className="text-[10px] text-brand-ink font-bold uppercase tracking-wider mb-1">Pendiente de revisión</p>
-                                      <p className="text-[9px] text-brand-ink/60 font-semibold leading-relaxed">
-                                        El Gerente debe subir el reporte POS correspondiente para auditar y calcular las diferencias de este día.
-                                      </p>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {c.estado === "Cuadrado" && (
-                                  <div className="mt-4 pt-3 border-t border-dashed border-zinc-200 text-[9px] text-brand-ink/60 font-bold uppercase tracking-wide space-y-0.5">
-                                    <div><span className="font-black text-brand-ink">Auditado por:</span> {c.auditadoPor}</div>
-                                    {c.auditadoAt && (
-                                      <div><span className="font-black text-brand-ink">Fecha:</span> {new Date(c.auditadoAt).toLocaleDateString()} {new Date(c.auditadoAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Novedades reportadas */}
-                            {c.novedades && (
-                              <div className="bg-white border border-brand-ink p-4 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.05)]">
-                                <h4 className="text-[10px] font-black uppercase tracking-widest text-brand-ink/50 mb-2">Novedades reportadas del turno</h4>
-                                <p className="text-xs font-semibold text-brand-ink italic bg-zinc-50 p-2.5 border border-zinc-100">
-                                  "{c.novedades}"
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
+        {activeTab === "inventory" ? (
+          <InventoryClosure
+            username={username}
+            userRole={role}
+            localName={local}
+          />
+        ) : activeTab === "checklist" ? (
+          <OperationalChecklist
+            username={username}
+            userRole={role}
+            localName={local}
+          />
         ) : activeTab === "password" ? (
           /* Vista de Cambiar Contraseña */
-          <div className="bg-white border-2 border-brand-ink shadow-[6px_6px_0px_0px_#1C1917] max-w-lg mx-auto">
-            <div className="border-b-2 border-brand-ink p-6 bg-brand-bg flex items-center space-x-3">
-              <Key className="w-6 h-6 text-brand-ink" />
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] max-w-lg mx-auto overflow-hidden">
+            <div className="border-b border-slate-100 p-6 bg-slate-50/50 flex items-center space-x-3.5">
+              <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
+                <Key className="w-5 h-5" />
+              </div>
               <div>
-                <h2 className="text-xl font-black text-brand-ink uppercase tracking-tight">Cambiar Mi Contraseña</h2>
-                <p className="text-xs text-brand-ink/70 font-semibold">
+                <h2 className="text-base font-extrabold text-slate-900 tracking-tight">Cambiar Mi Contraseña</h2>
+                <p className="text-xs text-slate-500 font-medium">
                   Actualiza tu contraseña para mantener la seguridad de tu acceso.
                 </p>
               </div>
             </div>
 
-            <form onSubmit={handlePasswordChangeSubmit} className="p-6 space-y-5">
+            <form onSubmit={handlePasswordChangeSubmit} className="p-6 space-y-4">
               {passwordError && (
-                <div className="bg-red-50 border-2 border-brand-danger p-3 text-brand-danger text-xs font-black flex items-center space-x-2 animate-[shake_0.4s_ease-in-out]">
+                <div className="bg-rose-50 border border-rose-200 rounded-xl p-3.5 text-rose-700 text-xs font-bold flex items-center space-x-2">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
                   <span>{passwordError}</span>
                 </div>
               )}
 
               {passwordSuccess && (
-                <div className="bg-emerald-50 border-2 border-brand-success p-3 text-brand-success text-xs font-black flex items-center space-x-2 animate-[scale_0.2s_ease-out]">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 text-emerald-700 text-xs font-bold flex items-center space-x-2">
                   <CheckCircle2 className="w-4 h-4 shrink-0" />
                   <span>{passwordSuccess}</span>
                 </div>
@@ -948,7 +792,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
 
               {/* Contraseña Actual */}
               <div className="space-y-1.5">
-                <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
+                <label className="text-xs font-bold text-slate-700 block">
                   Contraseña Actual
                 </label>
                 <div className="relative">
@@ -958,12 +802,12 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full bg-white border-2 border-brand-ink px-3 py-2.5 text-xs font-bold text-brand-ink outline-none tracking-widest"
+                    className="w-full bg-slate-50/50 hover:bg-white focus:bg-white border border-slate-200 focus:border-[#1E3E30] focus:ring-2 focus:ring-[#1E3E30]/15 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-800 outline-none transition-all"
                   />
                   <button
                     type="button"
                     onClick={() => setShowCurrentPass(!showCurrentPass)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-ink/50 hover:text-brand-ink cursor-pointer focus:outline-none"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer focus:outline-none"
                   >
                     {showCurrentPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -972,7 +816,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
 
               {/* Nueva Contraseña */}
               <div className="space-y-1.5">
-                <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
+                <label className="text-xs font-bold text-slate-700 block">
                   Nueva Contraseña
                 </label>
                 <div className="relative">
@@ -982,12 +826,12 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="Mínimo 3 caracteres"
-                    className="w-full bg-white border-2 border-brand-ink px-3 py-2.5 text-xs font-bold text-brand-ink outline-none tracking-widest"
+                    className="w-full bg-slate-50/50 hover:bg-white focus:bg-white border border-slate-200 focus:border-[#1E3E30] focus:ring-2 focus:ring-[#1E3E30]/15 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-800 outline-none transition-all"
                   />
                   <button
                     type="button"
                     onClick={() => setShowNewPass(!showNewPass)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-ink/50 hover:text-brand-ink cursor-pointer focus:outline-none"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer focus:outline-none"
                   >
                     {showNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -996,7 +840,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
 
               {/* Confirmar Nueva Contraseña */}
               <div className="space-y-1.5">
-                <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
+                <label className="text-xs font-bold text-slate-700 block">
                   Confirmar Nueva Contraseña
                 </label>
                 <div className="relative">
@@ -1006,12 +850,12 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="Repita la nueva contraseña"
-                    className="w-full bg-white border-2 border-brand-ink px-3 py-2.5 text-xs font-bold text-brand-ink outline-none tracking-widest"
+                    className="w-full bg-slate-50/50 hover:bg-white focus:bg-white border border-slate-200 focus:border-[#1E3E30] focus:ring-2 focus:ring-[#1E3E30]/15 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-800 outline-none transition-all"
                   />
                   <button
                     type="button"
                     onClick={() => setShowConfirmNewPass(!showConfirmNewPass)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-ink/50 hover:text-brand-ink cursor-pointer focus:outline-none"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer focus:outline-none"
                   >
                     {showConfirmNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -1021,7 +865,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
               <button
                 type="submit"
                 disabled={isUpdatingPassword}
-                className="w-full bg-brand-ink hover:bg-black text-white text-xs font-black uppercase tracking-wider py-3.5 border-2 border-brand-ink shadow-[3px_3px_0px_0px_#D4D4D8] transition-all cursor-pointer flex items-center justify-center space-x-2 disabled:opacity-50"
+                className="w-full mt-2 bg-[#1E3E30] hover:bg-[#163025] text-white text-xs font-bold py-3 rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center space-x-2 disabled:opacity-50"
               >
                 {isUpdatingPassword ? (
                   <>
@@ -1037,94 +881,545 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
               </button>
             </form>
           </div>
+        ) : (
+          /* Módulo de Cierre de Caja con Subpestañas */
+          <div className="space-y-6">
+            {/* Sub-selector de Pestañas: Registrar Cierre vs Historial */}
+            <div className="flex bg-slate-200/80 p-1.5 rounded-2xl border border-slate-300/80 gap-1.5 w-full sm:w-auto self-start shadow-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setCajaSubTab("form");
+                  setSuccessData(null);
+                }}
+                className={`flex-1 sm:flex-initial py-2.5 px-4 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
+                  cajaSubTab === "form" 
+                    ? "bg-white text-[#1E3E30] shadow-sm font-extrabold" 
+                    : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
+                }`}
+              >
+                <PlusCircle className={`w-4 h-4 ${cajaSubTab === "form" ? "text-[#1E3E30]" : "text-slate-500"}`} />
+                <span>{editingId ? "Editar Cierre" : "Registrar Cierre"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCajaSubTab("history");
+                  fetchHistory();
+                }}
+                className={`flex-1 sm:flex-initial py-2.5 px-4 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
+                  cajaSubTab === "history" 
+                    ? "bg-white text-[#1E3E30] shadow-sm font-extrabold" 
+                    : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
+                }`}
+              >
+                <History className={`w-4 h-4 ${cajaSubTab === "history" ? "text-[#1E3E30]" : "text-slate-500"}`} />
+                <span>Historial de Cierres ({history.length})</span>
+              </button>
+            </div>
+
+            {cajaSubTab === "history" ? (
+              /* Vista de Historial */
+              <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] overflow-hidden">
+            {/* Cabecera de Historial con Filtros */}
+            <div className="border-b border-slate-100 p-6 bg-slate-50/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">Historial de Cierres de Caja</h2>
+                <p className="text-xs text-slate-500 mt-1 font-medium">
+                  {canSeeAllTeam 
+                    ? "Consulta el registro histórico de los cierres realizados por el equipo y su estado de auditoría."
+                    : "Consulta el registro histórico de tus cierres de caja realizados y su estado de auditoría."}
+                </p>
+              </div>
+
+              {/* Filtro de Usuario */}
+              {canSeeAllTeam ? (
+                <div className="flex bg-slate-200/60 p-1 rounded-xl self-stretch sm:self-auto gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setFilterUser("me")}
+                    className={`px-3.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all ${
+                      filterUser === "me" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Mis Cierres
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilterUser("all")}
+                    className={`px-3.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all ${
+                      filterUser === "all" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Todo el Equipo
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-[#1E3E30] text-white px-3.5 py-1.5 text-xs font-bold rounded-xl self-start sm:self-auto shadow-xs">
+                  Mis Cierres
+                </div>
+              )}
+            </div>
+
+            {/* Contenido de Historial */}
+            <div className="p-6">
+              {isLoadingHistory ? (
+                <div className="py-12 flex flex-col items-center justify-center text-slate-400">
+                  <Loader2 className="w-8 h-8 animate-spin stroke-2 mb-2 text-[#1E3E30]" />
+                  <span className="text-xs font-bold tracking-wide">Cargando historial...</span>
+                </div>
+              ) : filteredHistory.length === 0 ? (
+                <div className="py-12 flex flex-col items-center justify-center text-center text-slate-400 border border-dashed border-slate-200 rounded-2xl p-6">
+                  <Clock className="w-10 h-10 mb-3 stroke-1.5 text-slate-300" />
+                  <h3 className="text-sm font-bold text-slate-800">No se encontraron cierres</h3>
+                  <p className="text-xs text-slate-500 mt-1 max-w-sm">
+                    {filterUser === "me" 
+                      ? "Aún no has registrado ningún cierre de caja con tu usuario." 
+                      : "No hay cierres de caja registrados en el sistema para mostrar."}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredHistory.map((c) => {
+                    const isExpanded = expandedId === c.id;
+                    const totalCierre = (c.efectivoCierre || 0) + (c.datafonoCierre || 0) + (c.justoCierre || 0) + (c.rappiCierre || 0) + (c.transferenciasCierre || 0);
+                    
+                    return (
+                      <div 
+                        key={c.id} 
+                        className={`border rounded-2xl bg-white transition-all overflow-hidden ${
+                          isExpanded 
+                            ? "border-slate-300 shadow-md" 
+                            : "border-slate-200/80 hover:border-slate-300 hover:shadow-xs"
+                        }`}
+                      >
+                        {/* Cabecera del Item */}
+                        <div 
+                          onClick={() => setExpandedId(isExpanded ? null : c.id)}
+                          className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 cursor-pointer hover:bg-slate-50/70 transition-colors"
+                        >
+                          <div className="flex flex-wrap items-center gap-3">
+                            {/* Fecha */}
+                            <div className="bg-slate-900 text-white px-3 py-1 text-xs font-bold rounded-lg font-numeric">
+                              {c.fecha}
+                            </div>
+                            {/* Responsable */}
+                            <div className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+                              <span className="text-slate-400 text-[11px] font-medium">Por:</span>
+                              <span className="font-bold">{c.colaboradorNombre || "Sin nombre"}</span>
+                            </div>
+                            {/* Estado Badge */}
+                            {c.estado === "Cuadrado" ? (
+                              <span className="inline-flex items-center px-2.5 py-1 text-[11px] font-bold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                                <Check className="w-3.5 h-3.5 mr-1 stroke-[2.5]" />
+                                Cuadrado
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-1 text-[11px] font-bold rounded-lg bg-amber-50 text-amber-700 border border-amber-200/60">
+                                <Clock className="w-3.5 h-3.5 mr-1 stroke-[2.5]" />
+                                Pendiente por Auditar
+                              </span>
+                            )}
+
+                            {/* Editar Cierre Button (Solo si no está cuadrado) */}
+                            {c.estado !== "Cuadrado" ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  startEditingCierre(c);
+                                }}
+                                className="px-3 py-1 bg-white hover:bg-amber-50 text-slate-700 hover:text-amber-800 font-bold text-xs rounded-lg border border-slate-200 shadow-xs hover:border-amber-300 transition-all cursor-pointer flex items-center space-x-1.5"
+                                title="Editar o corregir datos de este cierre"
+                              >
+                                <Pencil className="w-3.5 h-3.5 text-amber-600" />
+                                <span>Editar</span>
+                              </button>
+                            ) : (
+                              <span
+                                className="px-2.5 py-1 bg-slate-100 text-slate-500 font-semibold text-[10px] rounded-lg border border-slate-200 flex items-center space-x-1 cursor-not-allowed opacity-80"
+                                title="Este cierre ya fue auditado y conciliado ('Cuadrado'), no es editable"
+                              >
+                                <Lock className="w-3 h-3 text-slate-400" />
+                                <span>Conciliado</span>
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between w-full sm:w-auto sm:space-x-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
+                            <div className="text-right">
+                              <span className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider leading-none mb-1">Total Reportado</span>
+                              <span className="font-extrabold text-sm text-slate-900 leading-none font-numeric">{formatCOP(String(totalCierre))}</span>
+                            </div>
+                            <div className="text-slate-400 p-1 rounded-lg hover:bg-slate-100">
+                              {isExpanded ? <ChevronUp className="w-4 h-4 stroke-[2.5]" /> : <ChevronDown className="w-4 h-4 stroke-[2.5]" />}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Detalle Desplegable */}
+                        {isExpanded && (
+                          <div className="border-t border-slate-100 bg-slate-50/50 p-4 sm:p-6 space-y-5">
+                            {/* Desglose de Canales */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {/* Lado Reporte Físico */}
+                              <div className="bg-white border border-slate-200/80 rounded-xl p-4 shadow-xs">
+                                <h4 className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2 mb-3">
+                                  Arqueo Físico Reportado
+                                </h4>
+                                <div className="space-y-2 text-xs font-medium text-slate-700">
+                                  <div className="flex justify-between py-1 border-b border-slate-50">
+                                    <span className="text-slate-500">Efectivo:</span>
+                                    <span className="font-bold text-slate-900 font-numeric">{formatCOP(String(c.efectivoCierre))}</span>
+                                  </div>
+                                  <div className="flex justify-between py-1 border-b border-slate-50">
+                                    <span className="text-slate-500">Datáfono / Vouchers:</span>
+                                    <span className="font-bold text-slate-900 font-numeric">{formatCOP(String(c.datafonoCierre))}</span>
+                                  </div>
+                                  <div className="flex justify-between py-1 border-b border-slate-50">
+                                    <span className="text-slate-500">Justo App:</span>
+                                    <span className="font-bold text-slate-900 font-numeric">{formatCOP(String(c.justoCierre))}</span>
+                                  </div>
+                                  <div className="flex justify-between py-1 border-b border-slate-50">
+                                    <span className="text-slate-500">Rappi App:</span>
+                                    <span className="font-bold text-slate-900 font-numeric">{formatCOP(String(c.rappiCierre))}</span>
+                                  </div>
+                                  <div className="flex justify-between py-1 border-b border-slate-50">
+                                    <span className="text-slate-500">Transferencias:</span>
+                                    <span className="font-bold text-slate-900 font-numeric">{formatCOP(String(c.transferenciasCierre))}</span>
+                                  </div>
+                                  <div className="border-t border-slate-100 pt-2 flex justify-between font-bold text-slate-900">
+                                    <span>Propinas Recibidas:</span>
+                                    <span className="text-indigo-600 font-numeric">{formatCOP(String(c.propinas))}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Lado Auditoría / POS */}
+                              <div className="bg-white border border-slate-200/80 rounded-xl p-4 shadow-xs flex flex-col justify-between">
+                                <div>
+                                  <h4 className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2 mb-3 flex justify-between items-center">
+                                    <span>Auditoría de Ventas</span>
+                                    {c.estado === "Cuadrado" && (
+                                      <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded-md">Aprobado</span>
+                                    )}
+                                  </h4>
+
+                                  {c.estado === "Cuadrado" ? (
+                                    <div className="space-y-2 text-xs font-medium text-slate-700">
+                                      {/* Comparaciones con discrepancias */}
+                                      <div className="flex justify-between items-center py-1 border-b border-slate-50">
+                                        <span className="text-slate-500">Efectivo POS / Dif:</span>
+                                        <div className="text-right">
+                                          <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.efectivoPOS))}</span>
+                                          <span className={`text-[10px] font-bold font-numeric ${
+                                            (c.difEfectivo || 0) === 0 ? "text-emerald-600" : (c.difEfectivo || 0) < 0 ? "text-rose-600" : "text-blue-600"
+                                          }`}>
+                                            {(c.difEfectivo || 0) === 0 ? "Sin dif." : `${(c.difEfectivo || 0) > 0 ? "+" : ""}${formatCOP(String(c.difEfectivo))}`}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex justify-between items-center py-1 border-b border-slate-50">
+                                        <span className="text-slate-500">Datáfono POS / Dif:</span>
+                                        <div className="text-right">
+                                          <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.tarjetasPOS))}</span>
+                                          <span className={`text-[10px] font-bold font-numeric ${
+                                            (c.difTarjetas || 0) === 0 ? "text-emerald-600" : (c.difTarjetas || 0) < 0 ? "text-rose-600" : "text-blue-600"
+                                          }`}>
+                                            {(c.difTarjetas || 0) === 0 ? "Sin dif." : `${(c.difTarjetas || 0) > 0 ? "+" : ""}${formatCOP(String(c.difTarjetas))}`}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex justify-between items-center py-1 border-b border-slate-50">
+                                        <span className="text-slate-500">Justo POS / Dif:</span>
+                                        <div className="text-right">
+                                          <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.justoPOS))}</span>
+                                          <span className={`text-[10px] font-bold font-numeric ${
+                                            (c.difJusto || 0) === 0 ? "text-emerald-600" : (c.difJusto || 0) < 0 ? "text-rose-600" : "text-blue-600"
+                                          }`}>
+                                            {(c.difJusto || 0) === 0 ? "Sin dif." : `${(c.difJusto || 0) > 0 ? "+" : ""}${formatCOP(String(c.difJusto))}`}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex justify-between items-center py-1 border-b border-slate-50">
+                                        <span className="text-slate-500">Rappi POS / Dif:</span>
+                                        <div className="text-right">
+                                          <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.rappiPOS))}</span>
+                                          <span className={`text-[10px] font-bold font-numeric ${
+                                            (c.difRappi || 0) === 0 ? "text-emerald-600" : (c.difRappi || 0) < 0 ? "text-rose-600" : "text-blue-600"
+                                          }`}>
+                                            {(c.difRappi || 0) === 0 ? "Sin dif." : `${(c.difRappi || 0) > 0 ? "+" : ""}${formatCOP(String(c.difRappi))}`}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex justify-between items-center py-1 border-b border-slate-50">
+                                        <span className="text-slate-500">Transf. POS / Dif:</span>
+                                        <div className="text-right">
+                                          <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.transferenciasPOS))}</span>
+                                          <span className={`text-[10px] font-bold font-numeric ${
+                                            (c.difTransferencias || 0) === 0 ? "text-emerald-600" : (c.difTransferencias || 0) < 0 ? "text-rose-600" : "text-blue-600"
+                                          }`}>
+                                            {(c.difTransferencias || 0) === 0 ? "Sin dif." : `${(c.difTransferencias || 0) > 0 ? "+" : ""}${formatCOP(String(c.difTransferencias))}`}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center justify-center py-6 px-4 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                      <AlertTriangle className="w-5 h-5 text-amber-500 mb-2 stroke-2" />
+                                      <p className="text-xs text-slate-800 font-bold mb-1">Pendiente de revisión</p>
+                                      <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                                        El Gerente debe subir el reporte POS correspondiente para auditar y calcular las diferencias de este día.
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {c.estado === "Cuadrado" && (
+                                  <div className="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-500 font-medium space-y-0.5">
+                                    <div><span className="font-bold text-slate-700">Auditado por:</span> {c.auditadoPor}</div>
+                                    {c.auditadoAt && (
+                                      <div><span className="font-bold text-slate-700">Fecha:</span> {new Date(c.auditadoAt).toLocaleDateString()} {new Date(c.auditadoAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Novedades reportadas */}
+                            {c.novedades && (
+                              <div className="bg-white border border-slate-200/80 rounded-xl p-4 shadow-xs">
+                                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Novedades reportadas del turno</h4>
+                                <p className="text-xs font-medium text-slate-700 italic bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                  "{c.novedades}"
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         ) : successData ? (
           /* Vista de Éxito */
-          <div className="bg-white border-2 border-brand-ink p-8 text-center max-w-lg mx-auto shadow-[6px_6px_0px_0px_#1C1917]">
-            <div className="inline-flex items-center justify-center w-14 h-14 bg-brand-success/10 border-2 border-brand-success text-brand-success mb-6">
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-8 text-center max-w-lg mx-auto shadow-[0_1px_3px_0_rgba(0,0,0,0.03)]">
+            <div className="inline-flex items-center justify-center w-14 h-14 bg-emerald-50 rounded-2xl border border-emerald-200 text-emerald-600 mb-5">
               <CheckCircle2 className="w-8 h-8 stroke-[2.5]" />
             </div>
             
-            <h2 className="text-2xl font-black text-brand-ink uppercase tracking-tight mb-2">
+            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight mb-2">
               ¡Cierre Guardado!
             </h2>
-            <p className="text-brand-ink/70 text-sm mb-6 font-medium">
-              El cierre de caja del día <strong className="text-brand-ink font-black">{successData.fecha}</strong> ha sido cargado con estado <strong className="text-brand-info font-black">"Pendiente por Cuadrar"</strong> para revisión del Gerente.
+            <p className="text-slate-500 text-xs mb-6 font-medium leading-relaxed">
+              El cierre de caja del día <strong className="text-slate-800 font-bold font-numeric">{successData.fecha}</strong> ha sido cargado con estado <strong className="text-blue-600 font-bold">"Pendiente por Cuadrar"</strong> para revisión del Gerente.
             </p>
 
             {/* Resumen Cargado */}
-            <div className="bg-brand-bg rounded-none p-5 border-2 border-brand-ink text-left space-y-3 mb-8">
-              <h3 className="text-xs font-black text-brand-ink uppercase tracking-widest border-b-2 border-brand-ink pb-2">
+            <div className="bg-slate-50/70 rounded-xl p-5 border border-slate-200/80 text-left space-y-2.5 mb-6">
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-200/60 pb-2">
                 Resumen del Arqueo Físico
               </h3>
-              <div className="grid grid-cols-2 gap-y-2 text-sm">
-                <span className="text-brand-ink/60 font-bold uppercase text-[11px] tracking-wider">Responsable:</span>
-                <span className="text-right font-black text-brand-ink">{successData.colaboradorNombre || "N/A"}</span>
+              <div className="grid grid-cols-2 gap-y-2 text-xs">
+                <span className="text-slate-500 font-medium">Responsable:</span>
+                <span className="text-right font-bold text-slate-900">{successData.colaboradorNombre || "N/A"}</span>
 
-                <span className="text-brand-ink/60 font-bold uppercase text-[11px] tracking-wider">Líder del Turno:</span>
-                <span className="text-right font-black text-brand-ink">{successData.liderNombre || "N/A"}</span>
+                <span className="text-slate-500 font-medium">Líder del Turno:</span>
+                <span className="text-right font-bold text-slate-900">{successData.liderNombre || "N/A"}</span>
 
                 {successData.auxiliaresNombres && successData.auxiliaresNombres.length > 0 && (
                   <>
-                    <span className="text-brand-ink/60 font-bold uppercase text-[11px] tracking-wider">Auxiliares:</span>
-                    <span className="text-right font-black text-brand-ink">{successData.auxiliaresNombres.join(", ")}</span>
+                    <span className="text-slate-500 font-medium">Auxiliares:</span>
+                    <span className="text-right font-bold text-slate-900">{successData.auxiliaresNombres.join(", ")}</span>
                   </>
                 )}
 
-                <span className="text-brand-ink/60 font-bold uppercase text-[11px] tracking-wider">Efectivo:</span>
-                <span className="text-right font-mono font-black text-brand-ink">{formatCOP(String(successData.efectivoCierre))}</span>
+                <span className="text-slate-500 font-medium">Efectivo:</span>
+                <span className="text-right font-bold text-slate-900 font-numeric">{formatCOP(String(successData.efectivoCierre))}</span>
                 
-                <span className="text-brand-ink/60 font-bold uppercase text-[11px] tracking-wider">Datáfono:</span>
-                <span className="text-right font-mono font-black text-brand-ink">{formatCOP(String(successData.datafonoCierre))}</span>
+                <span className="text-slate-500 font-medium">Datáfono:</span>
+                <span className="text-right font-bold text-slate-900 font-numeric">{formatCOP(String(successData.datafonoCierre))}</span>
                 
-                <span className="text-brand-ink/60 font-bold uppercase text-[11px] tracking-wider">Justo App:</span>
-                <span className="text-right font-mono font-black text-brand-ink">{formatCOP(String(successData.justoCierre))}</span>
+                <span className="text-slate-500 font-medium">Justo App:</span>
+                <span className="text-right font-bold text-slate-900 font-numeric">{formatCOP(String(successData.justoCierre))}</span>
                 
-                <span className="text-brand-ink/60 font-bold uppercase text-[11px] tracking-wider">Rappi App:</span>
-                <span className="text-right font-mono font-black text-brand-ink">{formatCOP(String(successData.rappiCierre))}</span>
+                <span className="text-slate-500 font-medium">Rappi App:</span>
+                <span className="text-right font-bold text-slate-900 font-numeric">{formatCOP(String(successData.rappiCierre))}</span>
 
-                <span className="text-brand-ink/60 font-bold uppercase text-[11px] tracking-wider">Transferencias:</span>
-                <span className="text-right font-mono font-black text-brand-ink">{formatCOP(String(successData.transferenciasCierre))}</span>
+                <span className="text-slate-500 font-medium">Transferencias:</span>
+                <span className="text-right font-bold text-slate-900 font-numeric">{formatCOP(String(successData.transferenciasCierre))}</span>
                 
-                <div className="col-span-2 border-t border-brand-ink my-1"></div>
+                <div className="col-span-2 border-t border-slate-200 my-1"></div>
 
-                <span className="text-brand-ink font-black uppercase text-[11px] tracking-wider">Propinas (Incr.):</span>
-                <span className="text-right font-mono font-black text-brand-ink">{formatCOP(String(successData.propinas))}</span>
+                <span className="text-slate-800 font-bold">Propinas (Incr.):</span>
+                <span className="text-right font-bold text-indigo-600 font-numeric">{formatCOP(String(successData.propinas))}</span>
                 
-                <span className="text-brand-success font-black uppercase text-[12px] tracking-wider">Flujo Total Recibido:</span>
-                <span className="text-right font-mono font-black text-brand-success">
+                <span className="text-emerald-700 font-extrabold text-xs">Flujo Total Recibido:</span>
+                <span className="text-right font-extrabold text-emerald-700 text-sm font-numeric">
                   {formatCOP(String(successData.efectivoCierre + successData.datafonoCierre + successData.justoCierre + successData.rappiCierre + successData.transferenciasCierre + successData.propinas))}
                 </span>
               </div>
             </div>
 
-            <button
-              onClick={handleResetForm}
-              className="px-6 py-3 bg-brand-ink hover:bg-black text-white font-black uppercase tracking-wider text-xs inline-flex items-center space-x-2 cursor-pointer border-2 border-brand-ink shadow-[3px_3px_0px_0px_#D4D4D8] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#D4D4D8] transition-all"
-            >
-              <RotateCcw className="w-4 h-4 stroke-[2.5]" />
-              <span>Registrar Otro Cierre</span>
-            </button>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <button
+                onClick={() => {
+                  const savedId = successData.id;
+                  setSuccessData(null);
+                  setCajaSubTab("history");
+                  fetchHistory();
+                  setExpandedId(savedId);
+                }}
+                className="w-full sm:w-auto px-5 py-2.5 bg-[#1E3E30] hover:bg-[#163025] text-white font-bold text-xs rounded-xl shadow-xs inline-flex items-center justify-center space-x-2 cursor-pointer transition-all"
+              >
+                <History className="w-4 h-4" />
+                <span>Ir al Historial de Cierres</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const dataToEdit = successData;
+                  setSuccessData(null);
+                  startEditingCierre(dataToEdit);
+                }}
+                className="w-full sm:w-auto px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 shadow-xs inline-flex items-center justify-center space-x-2 cursor-pointer transition-all"
+              >
+                <Pencil className="w-4 h-4 text-amber-600" />
+                <span>Editar este Cierre</span>
+              </button>
+            </div>
+          </div>
+        ) : existingClosureForSelectedDate && !editingId ? (
+          /* Bloque de aviso cuando ya existe un cierre de caja para esa fecha */
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] p-6 space-y-6">
+            <div className={`border rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${
+              existingClosureForSelectedDate.estado === "Cuadrado"
+                ? "bg-emerald-50/60 border-emerald-200"
+                : "bg-amber-50/60 border-amber-200"
+            }`}>
+              <div className="flex items-start space-x-3.5">
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
+                  existingClosureForSelectedDate.estado === "Cuadrado" ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"
+                }`}>
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 tracking-tight">
+                    {existingClosureForSelectedDate.estado === "Cuadrado"
+                      ? `Cierre Conciliado para el Día ${fecha}`
+                      : `Cierre Ya Registrado para el Día ${fecha}`}
+                  </h3>
+                  <p className="text-xs text-slate-600 font-medium mt-1 leading-relaxed">
+                    {existingClosureForSelectedDate.estado === "Cuadrado"
+                      ? `El cierre de caja para el día ${fecha} ya fue auditado y conciliado ("Cuadrado") por la gerencia. No es posible modificarlo ni registrar un nuevo cierre.`
+                      : `Ya existe un cierre de caja guardado para esta fecha por `}
+                    {existingClosureForSelectedDate.estado !== "Cuadrado" && (
+                      <strong className="font-bold text-slate-800">{existingClosureForSelectedDate.colaboradorNombre || "el equipo"}</strong>
+                    )}
+                    {existingClosureForSelectedDate.estado !== "Cuadrado" && `. Al estar pendiente por auditar, puedes editar sus valores.`}
+                  </p>
+                  <div className={`mt-3 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-700 p-3 rounded-xl border ${
+                    existingClosureForSelectedDate.estado === "Cuadrado" ? "bg-white/90 border-emerald-200" : "bg-white/90 border-amber-200"
+                  }`}>
+                    <span>Efectivo: <strong className="font-numeric text-slate-900">{formatCOP(String(existingClosureForSelectedDate.efectivoCierre))}</strong></span>
+                    <span className="text-slate-300">•</span>
+                    <span>Datáfono: <strong className="font-numeric text-slate-900">{formatCOP(String(existingClosureForSelectedDate.datafonoCierre))}</strong></span>
+                    <span className="text-slate-300">•</span>
+                    <span>Propinas: <strong className="font-numeric text-slate-900">{formatCOP(String(existingClosureForSelectedDate.propinas))}</strong></span>
+                    <span className="text-slate-300">•</span>
+                    <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                      existingClosureForSelectedDate.estado === "Cuadrado" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                    }`}>
+                      Estado: {existingClosureForSelectedDate.estado}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto shrink-0">
+                {existingClosureForSelectedDate.estado !== "Cuadrado" && (
+                  <button
+                    type="button"
+                    onClick={() => startEditingCierre(existingClosureForSelectedDate)}
+                    className="px-4 py-2.5 bg-[#1E3E30] hover:bg-[#163025] text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center space-x-2"
+                  >
+                    <Pencil className="w-4 h-4 text-amber-300" />
+                    <span>Editar este Cierre</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCajaSubTab("history");
+                    fetchHistory();
+                    setExpandedId(existingClosureForSelectedDate.id);
+                  }}
+                  className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 shadow-xs transition-all cursor-pointer flex items-center justify-center space-x-2"
+                >
+                  <History className="w-4 h-4 text-slate-500" />
+                  <span>Ver en Historial</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 rounded-xl border border-slate-200/80 p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+              <span className="text-xs font-medium text-slate-600">
+                ¿Deseas consultar o ingresar el cierre de otra fecha?
+              </span>
+              <div className="flex items-center space-x-2">
+                <label className="text-xs font-bold text-slate-700">Fecha:</label>
+                <input
+                  type="date"
+                  value={fecha}
+                  onChange={(e) => setFecha(e.target.value)}
+                  className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 outline-none cursor-pointer focus:ring-2 focus:ring-[#1E3E30]/20"
+                />
+              </div>
+            </div>
           </div>
         ) : (
           /* Formulario de Ingesta */
-          <div className="bg-white border-2 border-brand-ink shadow-[6px_6px_0px_0px_#1C1917]">
-            <div className="border-b-2 border-brand-ink p-6 bg-brand-bg">
-              <h2 className="text-2xl font-black text-brand-ink uppercase tracking-tight">Formulario de Cierre Diario</h2>
-              <p className="text-xs text-brand-ink/70 mt-1 font-semibold">
-                Ingrese con precisión todos los arqueos físicos medidos al finalizar el turno.
-              </p>
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] overflow-hidden">
+            <div className="border-b border-slate-100 p-6 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">
+                  {editingId ? `Editando Cierre del ${fecha}` : "Formulario de Cierre Diario"}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5 font-medium">
+                  {editingId 
+                    ? "Corrija los valores que requiera y guarde los cambios para actualizar la información en el sistema."
+                    : "Ingrese con precisión todos los arqueos físicos medidos al finalizar el turno."}
+                </p>
+              </div>
+
+              {editingId && (
+                <button
+                  type="button"
+                  onClick={cancelEditing}
+                  className="px-3.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer self-start sm:self-auto"
+                >
+                  Cancelar Edición
+                </button>
+              )}
             </div>
 
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 
                 {/* Fecha */}
                 <div className="col-span-1">
-                  <label className="block text-xs font-black text-brand-ink uppercase tracking-widest mb-1.5">
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
                     Fecha del Turno
                   </label>
                   <div className="relative">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-brand-ink/50">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 pointer-events-none">
                       <Calendar className="w-4 h-4" />
                     </span>
                     <input
@@ -1132,14 +1427,14 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                       required
                       value={fecha}
                       onChange={(e) => setFecha(e.target.value)}
-                      className={`w-full pl-10 pr-4 py-2.5 bg-white border-2 text-brand-ink text-sm font-semibold focus:bg-brand-bg outline-none ${
-                        history.some(c => c.fecha === fecha) ? "border-brand-accent" : "border-brand-ink"
+                      className={`w-full pl-10 pr-4 py-2.5 bg-slate-50/50 hover:bg-white focus:bg-white border rounded-xl text-slate-900 text-sm font-semibold focus:ring-2 focus:ring-[#1E3E30]/15 focus:border-[#1E3E30] outline-none transition-all ${
+                        history.some(c => c.fecha === fecha) ? "border-amber-400 bg-amber-50/20" : "border-slate-200"
                       }`}
                     />
                   </div>
                   {history.some(c => c.fecha === fecha) && (
-                    <div className="mt-2 flex items-center gap-1.5 p-2 bg-amber-50 border border-amber-300 text-amber-900 text-[11px] font-bold uppercase tracking-wide">
-                      <AlertTriangle className="w-4 h-4 shrink-0 text-brand-accent" />
+                    <div className="mt-2 flex items-center gap-2 p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-amber-800 text-xs font-medium">
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
                       <span>Ya existe un cierre registrado para este día</span>
                     </div>
                   )}
@@ -1147,12 +1442,12 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
 
                 {/* Persona que realiza el cierre */}
                 <div className="col-span-1">
-                  <label className="block text-xs font-black text-brand-ink uppercase tracking-widest mb-1.5 flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
                     <span>Responsable del Cierre</span>
-                    <span className="text-[9px] text-brand-accent font-black uppercase">Obligatorio</span>
+                    <span className="text-[10px] text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-full">Obligatorio</span>
                   </label>
                   <div className="relative">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-brand-ink/50">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 pointer-events-none">
                       <User className="w-4 h-4" />
                     </span>
                     <input
@@ -1161,33 +1456,35 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                       placeholder="Nombre de quien cierra"
                       value={colaboradorNombre}
                       onChange={(e) => setColaboradorNombre(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 bg-white border-2 border-brand-ink text-brand-ink text-sm font-semibold focus:bg-brand-bg outline-none"
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-50/50 hover:bg-white focus:bg-white border border-slate-200 focus:border-[#1E3E30] focus:ring-2 focus:ring-[#1E3E30]/15 rounded-xl text-slate-900 text-sm font-semibold outline-none transition-all"
                     />
                   </div>
                 </div>
 
                 {/* Equipo del Turno */}
-                <div className="col-span-1 md:col-span-2 bg-zinc-50 border-2 border-brand-ink p-4 space-y-4">
-                  <div className="flex items-center space-x-2 border-b border-brand-ink/20 pb-2">
-                    <Users className="w-5 h-5 text-brand-ink" />
+                <div className="col-span-1 md:col-span-2 bg-slate-50/60 border border-slate-200/80 rounded-2xl p-4 space-y-4">
+                  <div className="flex items-center space-x-2.5 border-b border-slate-200/60 pb-3">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                      <Users className="w-4 h-4" />
+                    </div>
                     <div>
-                      <h3 className="text-xs font-black text-brand-ink uppercase tracking-wider">Equipo de Trabajo del Turno</h3>
-                      <p className="text-[10px] text-brand-ink/60 font-semibold uppercase">Establece el personal que laboró en {local}</p>
+                      <h3 className="text-xs font-bold text-slate-900">Equipo de Trabajo del Turno</h3>
+                      <p className="text-[11px] text-slate-500 font-medium">Personal que laboró en sede {local}</p>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {/* Líder de Punto */}
                     <div>
-                      <label className="block text-xs font-black text-brand-ink uppercase tracking-widest mb-1.5 flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
                         <span>Líder de Punto a Cargo</span>
-                        <span className="text-[9px] text-brand-accent font-black uppercase">Obligatorio</span>
+                        <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full">Obligatorio</span>
                       </label>
                       <div className="relative">
                         <select
                           value={liderNombre}
                           onChange={(e) => setLiderNombre(e.target.value)}
-                          className="w-full pl-3 pr-10 py-2.5 bg-white border-2 border-brand-ink text-brand-ink text-sm font-semibold focus:bg-brand-bg outline-none cursor-pointer appearance-none"
+                          className="w-full pl-3.5 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm font-semibold focus:border-[#1E3E30] focus:ring-2 focus:ring-[#1E3E30]/15 outline-none cursor-pointer appearance-none shadow-xs"
                         >
                           {localRegisteredUsers.leaders.map((leader) => (
                             <option key={leader.nombre} value={leader.nombre}>
@@ -1198,7 +1495,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                             <option value={username}>{username} (Tú)</option>
                           )}
                         </select>
-                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-brand-ink border-l-2 border-brand-ink bg-zinc-100">
+                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-slate-400">
                           <ChevronDown className="w-4 h-4 stroke-[2.5]" />
                         </div>
                       </div>
@@ -1206,21 +1503,18 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
 
                     {/* Auxiliares de Venta */}
                     <div>
-                      <label className="block text-xs font-black text-brand-ink uppercase tracking-widest mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
                         Auxiliares del Turno (Seleccionar de la lista)
                       </label>
                       
                       {localRegisteredUsers.assistants.length === 0 ? (
-                        <div className="bg-white p-3 border-2 border-dashed border-zinc-200 text-center rounded-none">
-                          <p className="text-[10px] text-brand-ink/50 uppercase font-bold italic">
-                            No hay auxiliares registrados en el local {local}
-                          </p>
-                          <p className="text-[9px] text-brand-ink/40 font-semibold mt-1">
-                            Registra auxiliares en la pantalla de inicio con local "{local}" para que aparezcan aquí.
+                        <div className="bg-white p-3 border border-dashed border-slate-200 text-center rounded-xl">
+                          <p className="text-[11px] text-slate-400 font-medium italic">
+                            No hay auxiliares registrados en la sede {local}
                           </p>
                         </div>
                       ) : (
-                        <div className="bg-white border-2 border-brand-ink max-h-32 overflow-y-auto p-2 space-y-1.5">
+                        <div className="bg-white border border-slate-200 rounded-xl max-h-32 overflow-y-auto p-1.5 space-y-1 shadow-xs">
                           {localRegisteredUsers.assistants.map((assistant) => {
                             const isSelected = selectedAuxiliares.includes(assistant.nombre);
                             return (
@@ -1234,17 +1528,17 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                                     setSelectedAuxiliares([...selectedAuxiliares, assistant.nombre]);
                                   }
                                 }}
-                                className={`w-full flex items-center justify-between p-2 text-xs font-bold uppercase transition-all border ${
+                                className={`w-full flex items-center justify-between p-2 rounded-lg text-xs font-semibold transition-all ${
                                   isSelected 
-                                    ? "bg-brand-accent/20 border-brand-ink text-brand-ink font-black" 
-                                    : "bg-white border-zinc-200 text-brand-ink/70 hover:bg-zinc-50"
+                                    ? "bg-emerald-50 text-emerald-900 font-bold border border-emerald-200" 
+                                    : "bg-white text-slate-700 hover:bg-slate-50 border border-transparent"
                                 }`}
                               >
                                 <span>{assistant.nombre}</span>
-                                <div className={`w-4 h-4 border-2 flex items-center justify-center ${
-                                  isSelected ? "bg-brand-ink border-brand-ink" : "border-zinc-300"
+                                <div className={`w-4 h-4 rounded flex items-center justify-center ${
+                                  isSelected ? "bg-[#1E3E30] text-white" : "border border-slate-300"
                                 }`}>
-                                  {isSelected && <Check className="w-3 h-3 text-white stroke-[3]" />}
+                                  {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
                                 </div>
                               </button>
                             );
@@ -1258,13 +1552,13 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                 {/* Efectivo */}
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="text-xs font-black text-brand-ink uppercase tracking-widest">
+                    <label className="text-xs font-bold text-slate-700">
                       Efectivo en Caja (Cierre)
                     </label>
-                    <span className="text-[10px] text-brand-ink font-black font-mono bg-brand-bg px-1.5 py-0.5 border border-brand-accent">{formatCOP(efectivo)}</span>
+                    <span className="text-xs font-bold text-[#1E3E30] bg-emerald-50 px-2 py-0.5 rounded-lg font-numeric">{formatCOP(efectivo)}</span>
                   </div>
                   <div className="relative">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-brand-ink/50">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 pointer-events-none">
                       <DollarSign className="w-4 h-4" />
                     </span>
                     <input
@@ -1273,7 +1567,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                       placeholder="0"
                       value={efectivo}
                       onChange={handleNumericChange(setEfectivo)}
-                      className="w-full pl-10 pr-4 py-2.5 bg-white border-2 border-brand-ink text-brand-ink text-sm font-mono focus:bg-brand-bg outline-none"
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-50/50 hover:bg-white focus:bg-white border border-slate-200 focus:border-[#1E3E30] focus:ring-2 focus:ring-[#1E3E30]/15 rounded-xl text-slate-900 text-sm font-bold font-numeric outline-none transition-all"
                     />
                   </div>
                 </div>
@@ -1281,13 +1575,13 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                 {/* Datáfono */}
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="text-xs font-black text-brand-ink uppercase tracking-widest">
+                    <label className="text-xs font-bold text-slate-700">
                       Tarjetas / Datáfono (Vouchers)
                     </label>
-                    <span className="text-[10px] text-brand-ink font-black font-mono bg-brand-bg px-1.5 py-0.5 border border-brand-accent">{formatCOP(datafono)}</span>
+                    <span className="text-xs font-bold text-[#1E3E30] bg-emerald-50 px-2 py-0.5 rounded-lg font-numeric">{formatCOP(datafono)}</span>
                   </div>
                   <div className="relative">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-brand-ink/50">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 pointer-events-none">
                       <CreditCard className="w-4 h-4" />
                     </span>
                     <input
@@ -1296,7 +1590,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                       placeholder="0"
                       value={datafono}
                       onChange={handleNumericChange(setDatafono)}
-                      className="w-full pl-10 pr-4 py-2.5 bg-white border-2 border-brand-ink text-brand-ink text-sm font-mono focus:bg-brand-bg outline-none"
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-50/50 hover:bg-white focus:bg-white border border-slate-200 focus:border-[#1E3E30] focus:ring-2 focus:ring-[#1E3E30]/15 rounded-xl text-slate-900 text-sm font-bold font-numeric outline-none transition-all"
                     />
                   </div>
                 </div>
@@ -1304,14 +1598,14 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                 {/* Justo */}
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="text-xs font-black text-brand-ink uppercase tracking-widest flex items-center space-x-1">
+                    <label className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
                       <span>Cierre Justo App</span>
-                      <span className="text-[9px] bg-brand-accent/20 text-brand-ink px-1 py-0.5 border border-brand-ink/20 font-black font-sans">POS</span>
+                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
                     </label>
-                    <span className="text-[10px] text-brand-ink font-black font-mono bg-brand-bg px-1.5 py-0.5 border border-brand-accent">{formatCOP(justo)}</span>
+                    <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg font-numeric">{formatCOP(justo)}</span>
                   </div>
                   <div className="relative">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-brand-ink/40">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 pointer-events-none">
                       <DollarSign className="w-4 h-4" />
                     </span>
                     <input
@@ -1319,25 +1613,25 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                       readOnly
                       placeholder="0"
                       value={justo}
-                      className="w-full pl-10 pr-4 py-2.5 bg-zinc-100 border-2 border-brand-ink/50 text-brand-ink text-sm font-black font-mono cursor-not-allowed outline-none border-dashed"
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-100 border border-slate-200 text-slate-500 rounded-xl text-sm font-bold font-numeric cursor-not-allowed outline-none"
                     />
                   </div>
-                  <p className="text-[9px] text-brand-ink/50 mt-1 font-bold">
-                    * Este espacio se llenará con reporte de POS.
+                  <p className="text-[11px] text-slate-400 mt-1 font-medium">
+                    * Se completará automáticamente con el reporte POS.
                   </p>
                 </div>
 
                 {/* Rappi */}
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="text-xs font-black text-brand-ink uppercase tracking-widest flex items-center space-x-1">
+                    <label className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
                       <span>Cierre Rappi App</span>
-                      <span className="text-[9px] bg-brand-accent/20 text-brand-ink px-1 py-0.5 border border-brand-ink/20 font-black font-sans">POS</span>
+                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
                     </label>
-                    <span className="text-[10px] text-brand-ink font-black font-mono bg-brand-bg px-1.5 py-0.5 border border-brand-accent">{formatCOP(rappi)}</span>
+                    <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg font-numeric">{formatCOP(rappi)}</span>
                   </div>
                   <div className="relative">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-brand-ink/40">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 pointer-events-none">
                       <DollarSign className="w-4 h-4" />
                     </span>
                     <input
@@ -1345,25 +1639,25 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                       readOnly
                       placeholder="0"
                       value={rappi}
-                      className="w-full pl-10 pr-4 py-2.5 bg-zinc-100 border-2 border-brand-ink/50 text-brand-ink text-sm font-black font-mono cursor-not-allowed outline-none border-dashed"
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-100 border border-slate-200 text-slate-500 rounded-xl text-sm font-bold font-numeric cursor-not-allowed outline-none"
                     />
                   </div>
-                  <p className="text-[9px] text-brand-ink/50 mt-1 font-bold">
-                    * Este espacio se llenará con reporte de POS.
+                  <p className="text-[11px] text-slate-400 mt-1 font-medium">
+                    * Se completará automáticamente con el reporte POS.
                   </p>
                 </div>
 
                 {/* Transferencias */}
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="text-xs font-black text-brand-ink uppercase tracking-widest flex items-center space-x-1">
+                    <label className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
                       <span>Transferencias (POS)</span>
-                      <span className="text-[9px] bg-brand-accent/20 text-brand-ink px-1 py-0.5 border border-brand-ink/20 font-black font-sans">POS</span>
+                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
                     </label>
-                    <span className="text-[10px] text-brand-ink font-black font-mono bg-brand-bg px-1.5 py-0.5 border border-brand-accent">{formatCOP(transferencias)}</span>
+                    <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg font-numeric">{formatCOP(transferencias)}</span>
                   </div>
                   <div className="relative">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-brand-ink/40">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 pointer-events-none">
                       <DollarSign className="w-4 h-4" />
                     </span>
                     <input
@@ -1371,29 +1665,29 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                       readOnly
                       placeholder="0"
                       value={transferencias}
-                      className="w-full pl-10 pr-4 py-2.5 bg-zinc-100 border-2 border-brand-ink/50 text-brand-ink text-sm font-black font-mono cursor-not-allowed outline-none border-dashed"
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-100 border border-slate-200 text-slate-500 rounded-xl text-sm font-bold font-numeric cursor-not-allowed outline-none"
                     />
                   </div>
-                  <p className="text-[9px] text-brand-ink/50 mt-1 font-bold">
-                    * Este espacio se llenará con reporte de POS.
+                  <p className="text-[11px] text-slate-400 mt-1 font-medium">
+                    * Se completará automáticamente con el reporte POS.
                   </p>
                 </div>
 
                 {/* Propinas */}
-                <div className="col-span-1 md:col-span-2 bg-brand-bg p-4 border-2 border-brand-ink">
+                <div className="col-span-1 md:col-span-2 bg-indigo-50/40 p-4 rounded-2xl border border-indigo-100/80">
                   <div className="flex justify-between items-center mb-2">
                     <div>
-                      <label className="text-xs font-black text-brand-ink uppercase tracking-widest flex items-center space-x-1.5">
+                      <label className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
                         <span>Propinas Recibidas del Día</span>
                       </label>
-                      <p className="text-[10px] text-brand-ink/60 mt-0.5 font-bold uppercase">
+                      <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
                         Este valor entra al arqueo general pero se audita de manera independiente.
                       </p>
                     </div>
-                    <span className="text-xs text-brand-ink font-black font-mono bg-white px-2 py-1 border border-brand-accent">{formatCOP(propinas)}</span>
+                    <span className="text-xs text-indigo-700 font-bold bg-white px-2.5 py-1 rounded-lg border border-indigo-200 shadow-xs font-numeric">{formatCOP(propinas)}</span>
                   </div>
                   <div className="relative">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-brand-ink/40">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 pointer-events-none">
                       <DollarSign className="w-4 h-4" />
                     </span>
                     <input
@@ -1402,47 +1696,49 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                       placeholder="0"
                       value={propinas}
                       onChange={handleNumericChange(setPropinas)}
-                      className="w-full pl-10 pr-4 py-2.5 bg-white border-2 border-brand-ink text-brand-ink text-sm font-mono focus:bg-brand-bg outline-none"
+                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-indigo-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15 rounded-xl text-slate-900 text-sm font-bold font-numeric outline-none transition-all"
                     />
                   </div>
                 </div>
 
                 {/* Novedades */}
                 <div className="col-span-1 md:col-span-2">
-                  <label className="block text-xs font-black text-brand-ink uppercase tracking-widest mb-1.5">
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
                     Novedades u Observaciones del Turno
                   </label>
                   <div className="relative">
-                    <span className="absolute top-3 left-3 text-brand-ink/50">
+                    <span className="absolute top-3.5 left-3.5 text-slate-400 pointer-events-none">
                       <FileText className="w-4 h-4" />
                     </span>
                     <textarea
                       required
                       rows={3}
-                      placeholder="Escriba los pormenores del turno, novedades en caja, fallas en datáfono o explicaciones de discrepancias si las conoce..."
+                      placeholder="Escriba los pormenores del turno, novedades en caja, fallas en datáfono o explicaciones de discrepancias..."
                       value={novedades}
                       onChange={(e) => setNovedades(e.target.value)}
-                      className="w-full pl-10 pr-4 py-3 bg-white border-2 border-brand-ink text-brand-ink text-sm font-semibold focus:bg-brand-bg outline-none resize-none"
+                      className="w-full pl-10 pr-4 py-3 bg-slate-50/50 hover:bg-white focus:bg-white border border-slate-200 focus:border-[#1E3E30] focus:ring-2 focus:ring-[#1E3E30]/15 rounded-xl text-slate-900 text-sm font-medium outline-none resize-none transition-all"
                     />
                   </div>
                 </div>
 
               </div>
 
-              <div className="border-t-2 border-brand-ink pt-6 flex justify-end">
+              <div className="border-t border-slate-100 pt-5 flex justify-end">
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-6 py-3 bg-brand-ink hover:bg-black text-white font-black uppercase tracking-widest text-xs cursor-pointer disabled:opacity-50 border-2 border-brand-ink shadow-[3px_3px_0px_0px_#D4D4D8] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#D4D4D8] transition-all flex items-center space-x-2"
+                  className="px-6 py-3 bg-[#1E3E30] hover:bg-[#163025] text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center space-x-2 disabled:opacity-50"
                 >
-                  <Send className="w-4 h-4 stroke-[2.5]" />
-                  <span>{isSubmitting ? "Enviando..." : "Guardar Cierre de Caja"}</span>
+                  {editingId ? <Pencil className="w-4 h-4 text-amber-300" /> : <Send className="w-4 h-4" />}
+                  <span>{isSubmitting ? "Procesando..." : editingId ? "Guardar Cambios del Cierre" : "Guardar Cierre de Caja"}</span>
                 </button>
               </div>
             </form>
           </div>
         )}
-      </main>
+      </div>
+    )}
+  </main>
     </div>
   );
 }
