@@ -33,6 +33,7 @@ import * as pdfjsLib from "pdfjs-dist";
 // @ts-ignore
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { dbAdapter } from "../db/dbAdapter";
+import { supabase } from "../db/supabaseConfig";
 import { CierreCaja } from "../types";
 import Logo from "./Logo";
 import InventoryClosure from "./InventoryClosure";
@@ -326,36 +327,30 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
   const [liderNombre, setLiderNombre] = useState(isLeaderRole ? username : "");
   const [selectedAuxiliares, setSelectedAuxiliares] = useState<string[]>([]);
 
+  const [teamMemberList, setTeamMemberList] = useState<any[]>([]);
+
+  useEffect(() => {
+    dbAdapter.getTeamMembers(local).then((members) => {
+      setTeamMemberList(members);
+    }).catch((err) => {
+      console.error("Error al cargar equipo en CollaboratorInflow:", err);
+    });
+  }, [local]);
+
   // Computed registered users from the same local
   const localRegisteredUsers = useMemo(() => {
-    const data = localStorage.getItem("lopez_gracia_user_registry");
-    let users: any[] = [];
-    if (!data) {
-      users = [
-        { nombre: "Gerente", role: "gerente", local: "Chapinero" },
-        { nombre: "Colaborador Lider", role: "Líder operador", local: "Chapinero" },
-        { nombre: "Colaborador Auxiliar", role: "Asistente de Servicio", local: "Chapinero" }
-      ];
-    } else {
-      try {
-        users = JSON.parse(data);
-      } catch (e) {
-        users = [];
-      }
-    }
-    
-    // Filter by the current local
-    const sameLocalUsers = users.filter(u => (u.local || "Chapinero").toLowerCase() === (local || "Chapinero").toLowerCase());
-    
-    const leaders = sameLocalUsers.filter(u => 
-      u.role === "Líder operador" || u.role === "Lider operador" || u.role === "Lider de punto" || (u.role && u.role.toLowerCase().includes("lider"))
-    );
-    const assistants = sameLocalUsers.filter(u => 
-      u.role !== "gerente" && !leaders.some(l => l.nombre === u.nombre)
-    );
-    
+    const leaders = teamMemberList.filter(u => {
+      const c = (u.cargo || u.role || "").toLowerCase();
+      return c.includes("lider operador") || c.includes("líder operador") || (c.includes("lider") && !c.includes("pasteler"));
+    });
+
+    const assistants = teamMemberList.filter(u => {
+      const c = (u.cargo || u.role || "").toLowerCase();
+      return !c.includes("geren") && !c.includes("admin") && !leaders.some(l => l.nombre === u.nombre);
+    });
+
     return { leaders, assistants };
-  }, [local]);
+  }, [teamMemberList]);
 
   // Set initial liderNombre based on roles and available leaders
   useEffect(() => {
@@ -423,7 +418,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
   const [passwordSuccess, setPasswordSuccess] = useState("");
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
-  const handlePasswordChangeSubmit = (e: React.FormEvent) => {
+  const handlePasswordChangeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordError("");
     setPasswordSuccess("");
@@ -445,56 +440,21 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
 
     setIsUpdatingPassword(true);
 
-    setTimeout(() => {
-      const data = localStorage.getItem("lopez_gracia_user_registry");
-      let users: any[] = [];
-      if (data) {
-        try {
-          users = JSON.parse(data);
-        } catch (e) {
-          users = [];
-        }
-      }
-
-      const userIndex = users.findIndex(u => u.nombre.toLowerCase() === username.toLowerCase());
-
-      if (userIndex === -1) {
-        const expectedCurrent = (username.toLowerCase().includes("lider") || username.toLowerCase().includes("colaborador") || username.toLowerCase().includes("auxiliar")) ? "tienda" : "admin";
-        
-        if (currentPassword !== expectedCurrent) {
-          setPasswordError("La contraseña actual es incorrecta.");
-          setIsUpdatingPassword(false);
-          return;
-        }
-
-        const newUser = {
-          nombre: username,
-          password: newPassword,
-          role: role,
-          local: local,
-          puntosPropinas: 1.0,
-          aptoPropinas: true,
-          activo: true
-        };
-        users.push(newUser);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
+        setPasswordError("Error al actualizar la contraseña: " + error.message);
       } else {
-        if (users[userIndex].password !== currentPassword) {
-          setPasswordError("La contraseña actual es incorrecta.");
-          setIsUpdatingPassword(false);
-          return;
-        }
-
-        users[userIndex].password = newPassword;
+        setPasswordSuccess("¡Contraseña actualizada con éxito en Supabase Auth! Utiliza tu nueva contraseña en tu próximo inicio de sesión.");
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
       }
-
-      localStorage.setItem("lopez_gracia_user_registry", JSON.stringify(users));
-      
-      setPasswordSuccess("¡Contraseña actualizada con éxito! Utiliza tu nueva contraseña en tu próximo inicio de sesión.");
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
+    } catch (err: any) {
+      setPasswordError(err?.message || "Error al actualizar contraseña");
+    } finally {
       setIsUpdatingPassword(false);
-    }, 600);
+    }
   };
 
   const canSeeAllTeam = isLeaderRole || role === "colaborador";
@@ -502,7 +462,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
   const fetchHistory = async () => {
     setIsLoadingHistory(true);
     try {
-      const data = await dbAdapter.getCierres();
+      const data = await dbAdapter.getCierres(local);
       setHistory(data);
     } catch (error) {
       console.error("Error al obtener historial:", error);
@@ -606,7 +566,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
           rappiPOS: 0,
           transferenciasPOS: 0,
           posFileName: "",
-        });
+        }, local);
         setSuccessData(result);
       }
 

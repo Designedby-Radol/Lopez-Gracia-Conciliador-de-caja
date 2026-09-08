@@ -40,17 +40,25 @@ export default function App() {
     localStorage.removeItem("lopez_gracia_local");
   };
 
+  const isManager = 
+    role === "gerente" || 
+    role === "Gerencia" || 
+    role === "admin" || 
+    role === "administrador" ||
+    String(role).toLowerCase().includes("geren") ||
+    String(role).toLowerCase().includes("admin");
+
   return (
     <div className="font-sans min-h-screen bg-brand-bg text-brand-ink">
       {role === null && (
         <Login onLoginSuccess={handleLoginSuccess} />
       )}
       
-      {role !== null && role !== "gerente" && (
+      {role !== null && !isManager && (
         <CollaboratorInflow onLogout={handleLogout} username={username} role={role} local={local} />
       )}
       
-      {role === "gerente" && (
+      {role !== null && isManager && (
         <ManagerDashboard onLogout={handleLogout} username={username} local={local} />
       )}
     </div>

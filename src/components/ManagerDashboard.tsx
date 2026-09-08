@@ -175,21 +175,10 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
   const [processingPosStep, setProcessingPosStep] = useState("");
   const [addingPersonToDayId, setAddingPersonToDayId] = useState<string | null>(null);
   const [newPersonNameForDay, setNewPersonNameForDay] = useState("");
-  const [propinasDaysMemberConfig, setPropinasDaysMemberConfig] = useState<Record<string, Record<string, { points: number; roleName: string }>>>(() => {
-    const saved = localStorage.getItem("lopez_gracia_daily_points_config");
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return {};
-      }
-    }
-    return {};
-  });
+  const [propinasDaysMemberConfig, setPropinasDaysMemberConfig] = useState<Record<string, Record<string, { points: number; roleName: string }>>>({});
 
   const saveDailyPointsConfig = (updated: Record<string, Record<string, { points: number; roleName: string }>>) => {
     setPropinasDaysMemberConfig(updated);
-    localStorage.setItem("lopez_gracia_daily_points_config", JSON.stringify(updated));
   };
 
   const [propinasGlobalAdjustment, setPropinasGlobalAdjustment] = useState<number>(0);
@@ -199,23 +188,24 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
 
   // Estado y sincronización unificada de Configuración de Equipo, Salarios y Horarios
-  const [salariesConfig, setSalariesConfig] = useState<Record<string, EmployeeSalaryConfig>>(() => {
-    try {
-      const saved = localStorage.getItem("lopez_gracia_salaries_config");
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error("Error al cargar salarios:", e);
-    }
-    return {};
-  });
+  const [salariesConfig, setSalariesConfig] = useState<Record<string, EmployeeSalaryConfig>>({});
 
   const [expandedMemberName, setExpandedMemberName] = useState<string | null>(null);
-  const smmlvBase = Number(localStorage.getItem("lopez_gracia_smmlv_base")) || 1750905;
-  const auxTranspBase = Number(localStorage.getItem("lopez_gracia_aux_transp_base")) || 249095;
+  const [smmlvBase, setSmmlvBase] = useState<number>(1750905);
+  const [auxTranspBase, setAuxTranspBase] = useState<number>(249095);
 
-  const saveSalariesConfigMap = (newMap: Record<string, EmployeeSalaryConfig>) => {
+  const saveSalariesConfigMap = async (newMap: Record<string, EmployeeSalaryConfig>) => {
     setSalariesConfig(newMap);
-    localStorage.setItem("lopez_gracia_salaries_config", JSON.stringify(newMap));
+    for (const [empName, cfg] of Object.entries(newMap)) {
+      const member = teamMembers.find(m => m.nombre === empName);
+      if (member?.id) {
+        try {
+          await dbAdapter.saveNominaConfig(member.id, cfg);
+        } catch (err) {
+          console.error("Error guardando nómina config en Supabase:", err);
+        }
+      }
+    }
   };
 
   const getEmployeeSalaryConfig = (member: any): EmployeeSalaryConfig => {
@@ -329,63 +319,72 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
   // Estado para confirmación de eliminación
   const [deletingMemberName, setDeletingMemberName] = useState<string | null>(null);
 
-  // Cargar equipo de localStorage al iniciar y sincronizar
-  const loadTeamMembers = () => {
-    const data = localStorage.getItem("lopez_gracia_user_registry");
-    let members = [];
-    if (data) {
-      try {
-        members = JSON.parse(data);
-      } catch (e) {
-        members = [];
-      }
+  // Cargar equipo de Supabase al iniciar y sincronizar
+  const loadTeamMembers = async () => {
+    try {
+      const members = await dbAdapter.getTeamMembers(local);
+      const normalized = members.map((m: any) => {
+        const role = m.cargo || m.role || "Asistente de Servicio";
+        const pts = getRolePoints(role);
+        return {
+          id: m.id,
+          nombre: m.nombre,
+          cedula: m.cedula || "",
+          password: "••••••••",
+          role: role,
+          cargo: m.cargo || role,
+          local: local,
+          puntosPropinas: pts,
+          aptoPropinas: typeof m.apto_propinas === "boolean" ? m.apto_propinas : (role !== "gerente" && role !== "Gerencia"),
+          activo: typeof m.activo === "boolean" ? m.activo : true
+        };
+      });
+      setTeamMembers(normalized);
+    } catch (err: any) {
+      console.error("Error cargando equipo de Supabase:", err);
     }
-    
-    // Normalizar con valores por defecto para propinas si no los tienen
-    const normalized = members.map((m: any) => {
-      const role = m.role || "Asistente de Servicio";
-      const pts = getRolePoints(role);
-      return {
-        nombre: m.nombre,
-        cedula: m.cedula || "",
-        password: m.password || "tienda",
-        role: role,
-        local: m.local || "Chapinero",
-        puntosPropinas: pts,
-        aptoPropinas: typeof m.aptoPropinas === "boolean" ? m.aptoPropinas : (m.role !== "gerente"),
-        activo: typeof m.activo === "boolean" ? m.activo : true
-      };
-    });
-    
-    setTeamMembers(normalized);
+  };
+
+  const loadInitialConfigs = async () => {
+    try {
+      const [nomConfigs, nomConfigGeneral] = await Promise.all([
+        dbAdapter.getAllNominaConfigs(),
+        dbAdapter.getConfiguracionNomina(local)
+      ]);
+      setSalariesConfig(nomConfigs);
+      if (nomConfigGeneral) {
+        if (nomConfigGeneral.smmlv_base) setSmmlvBase(Number(nomConfigGeneral.smmlv_base));
+        if (nomConfigGeneral.aux_transporte_base) setAuxTranspBase(Number(nomConfigGeneral.aux_transporte_base));
+      }
+    } catch (e) {
+      console.error("Error al cargar configuraciones de nómina desde Supabase:", e);
+    }
   };
 
   useEffect(() => {
     loadTeamMembers();
-  }, []);
+    loadInitialConfigs();
+  }, [local]);
 
   const saveTeamMembers = (updated: any[]) => {
     setTeamMembers(updated);
-    localStorage.setItem("lopez_gracia_user_registry", JSON.stringify(updated));
   };
 
-  const handleDeleteTeamMember = (memberName: string) => {
-    const updated = teamMembers.filter(m => m.nombre !== memberName);
-    saveTeamMembers(updated);
-
-    try {
-      const existingSalaries = JSON.parse(localStorage.getItem("lopez_gracia_salaries_config") || "{}");
-      if (existingSalaries[memberName]) {
-        delete existingSalaries[memberName];
-        localStorage.setItem("lopez_gracia_salaries_config", JSON.stringify(existingSalaries));
-        setSalariesConfig(existingSalaries);
-      }
-    } catch (e) {
-      console.error("Error al eliminar de salarios:", e);
+  const handleDeleteTeamMember = async (memberName: string) => {
+    const member = teamMembers.find(m => m.nombre === memberName);
+    if (!member?.id) {
+      setTeamMembers(teamMembers.filter(m => m.nombre !== memberName));
+      return;
     }
-
-    if (expandedMemberName === memberName) setExpandedMemberName(null);
-    setDeletingMemberName(null);
+    try {
+      await dbAdapter.deleteTeamMember(member.id);
+      await loadTeamMembers();
+      if (expandedMemberName === memberName) setExpandedMemberName(null);
+      setDeletingMemberName(null);
+    } catch (err: any) {
+      console.error("Error al eliminar miembro de Supabase:", err);
+      alert("Error al eliminar el colaborador: " + err.message);
+    }
   };
 
   const getMemberConfig = (name: string, closureId?: string) => {
@@ -810,21 +809,26 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
       setAuxiliaresInputList(selected.auxiliaresNombres || []);
       
       const isCuadrado = selected.estado === "Cuadrado";
+      const hasSavedPOS = selected.efectivoPOS !== undefined && selected.efectivoPOS !== null && selected.efectivoPOS > 0;
 
-      setPosData({
-        efectivoPOS: selected.efectivoPOS !== undefined ? selected.efectivoPOS : 0,
-        tarjetasPOS: selected.tarjetasPOS !== undefined ? selected.tarjetasPOS : 0,
-        justoPOS: selected.justoPOS !== undefined ? selected.justoPOS : 0,
-        rappiPOS: selected.rappiPOS !== undefined ? selected.rappiPOS : 0,
-        transferenciasPOS: selected.transferenciasPOS !== undefined ? selected.transferenciasPOS : 0,
-        fileName: selected.posFileName || (isCuadrado ? "Archivo Procesado" : "Ingreso Manual"),
-      });
+      if (hasSavedPOS) {
+        setPosData({
+          efectivoPOS: selected.efectivoPOS || 0,
+          tarjetasPOS: selected.tarjetasPOS || 0,
+          justoPOS: selected.justoPOS || 0,
+          rappiPOS: selected.rappiPOS || 0,
+          transferenciasPOS: selected.transferenciasPOS || 0,
+          fileName: selected.posFileName || (isCuadrado ? "Archivo Procesado" : "Ingreso Manual"),
+        });
+      } else {
+        setPosData(null);
+      }
 
-      setReconcileEfectivo(selected.efectivoPOS !== undefined ? selected.efectivoPOS : 0);
-      setReconcileDatafono(selected.tarjetasPOS !== undefined ? selected.tarjetasPOS : 0);
-      setReconcileTransferencias(selected.transferenciasPOS !== undefined ? selected.transferenciasPOS : 0);
-      setReconcileJusto(isCuadrado ? (selected.justoCierre || 0) : 0);
-      setReconcileRappi(isCuadrado ? (selected.rappiCierre || 0) : 0);
+      setReconcileEfectivo(selected.efectivoPOS !== undefined && selected.efectivoPOS !== null ? selected.efectivoPOS : selected.efectivoCierre);
+      setReconcileDatafono(selected.tarjetasPOS !== undefined && selected.tarjetasPOS !== null ? selected.tarjetasPOS : selected.datafonoCierre);
+      setReconcileTransferencias(selected.transferenciasPOS !== undefined && selected.transferenciasPOS !== null ? selected.transferenciasPOS : (selected.transferenciasCierre || 0));
+      setReconcileJusto(selected.justoCierre || 0);
+      setReconcileRappi(selected.rappiCierre || 0);
     } else {
       setLiderInputName("");
       setAuxiliaresInputList([]);
@@ -888,18 +892,20 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     );
   };
 
-  // Guardar y aprobar conciliación
+  // Guardar y aprobar conciliación (Paso 1 es opcional)
   const handleApproveConciliation = async (cierre: CierreCaja) => {
-    if (!posData) {
-      alert("Por favor, cargue primero el reporte POS en formato PDF (Paso 1) para proceder con la conciliación.");
-      return;
-    }
+    // Si no se cargó reporte POS, usar valores de conciliación o registrados previamente
+    const posEfectivo = posData ? posData.efectivoPOS : (cierre.efectivoPOS ?? reconcileEfectivo);
+    const posTarjetas = posData ? posData.tarjetasPOS : (cierre.tarjetasPOS ?? reconcileDatafono);
+    const posJusto = posData ? posData.justoPOS : (cierre.justoPOS ?? reconcileJusto);
+    const posRappi = posData ? posData.rappiPOS : (cierre.rappiPOS ?? reconcileRappi);
+    const posTransferencias = posData ? posData.transferenciasPOS : (cierre.transferenciasPOS ?? reconcileTransferencias);
 
     const difEfectivo = cierre.efectivoCierre - reconcileEfectivo;
     const difTarjetas = cierre.datafonoCierre - reconcileDatafono;
-    const difJusto = reconcileJusto - posData.justoPOS;
-    const difRappi = reconcileRappi - posData.rappiPOS;
-    const difTransferencias = reconcileTransferencias - posData.transferenciasPOS;
+    const difJusto = reconcileJusto - posJusto;
+    const difRappi = reconcileRappi - posRappi;
+    const difTransferencias = reconcileTransferencias - posTransferencias;
 
     const totalDif = difEfectivo + difTarjetas + difJusto + difRappi + difTransferencias;
 
@@ -910,18 +916,29 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
       const shortage = Math.abs(totalDif);
       descuadreLider = Math.round(shortage * 0.6);
       const remaining40 = shortage - descuadreLider;
-      if (auxiliaresInputList.length > 0) {
-        descuadreAuxiliar = Math.round(remaining40 / auxiliaresInputList.length);
+
+      // Política de descuadres (60/40) con los nuevos cargos:
+      // Solo participan auxiliares en turno con cargo Asistente de servicio / Auxiliar Pasteleria.
+      // Se excluyen explícitamente: Gerencia, admin, y Lider Pasteleria (responde por producción, no por caja).
+      const eligibleAuxiliares = auxiliaresInputList.filter((auxName) => {
+        const member = teamMembers.find(m => m.nombre.toLowerCase() === auxName.toLowerCase());
+        if (!member) return true;
+        const c = (member.cargo || member.role || "").toLowerCase();
+        return !c.includes("geren") && !c.includes("admin") && !c.includes("lider pasteler") && !c.includes("líder de pasteler");
+      });
+
+      if (eligibleAuxiliares.length > 0) {
+        descuadreAuxiliar = Math.round(remaining40 / eligibleAuxiliares.length);
       }
     }
 
     const updates: Partial<CierreCaja> = {
       estado: "Cuadrado",
-      efectivoPOS: posData.efectivoPOS,
-      tarjetasPOS: posData.tarjetasPOS,
-      justoPOS: posData.justoPOS,
-      rappiPOS: posData.rappiPOS,
-      transferenciasPOS: posData.transferenciasPOS,
+      efectivoPOS: posEfectivo,
+      tarjetasPOS: posTarjetas,
+      justoPOS: posJusto,
+      rappiPOS: posRappi,
+      transferenciasPOS: posTransferencias,
       
       // Save the final reconciled values back to the main closure object
       justoCierre: reconcileJusto,
@@ -935,8 +952,8 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
       difTransferencias,
       auditadoPor: username,
       auditadoAt: new Date().toISOString(),
-      posFileName: posData.fileName,
-      novedades: posData.anulacionesNote 
+      posFileName: posData?.fileName || cierre.posFileName || "Auditoría Directa (Sin Reporte POS)",
+      novedades: posData?.anulacionesNote 
         ? (cierre.novedades ? `${cierre.novedades} | ${posData.anulacionesNote}` : posData.anulacionesNote)
         : cierre.novedades,
       // Guardar información del equipo y política de descuentos
@@ -2696,26 +2713,44 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           )}
                         </div>
 
-                        {/* PASO 1: Cargar Reporte de POS (PDF) */}
-                        <div className="bg-white p-6 border-2 border-brand-ink mb-6 space-y-4 shadow-[4px_4px_0px_0px_#1C1917]">
-                          <div className="flex justify-between items-center border-b border-brand-bg pb-3">
+                        {/* PASO 1: Cargar Reporte de POS - Opcional / Automatización */}
+                        <div className="bg-white p-4 sm:p-5 border-2 border-brand-ink mb-5 space-y-3 shadow-[3px_3px_0px_0px_#1C1917]">
+                          <div className="flex flex-wrap justify-between items-center gap-2 border-b border-brand-bg pb-2.5">
                             <h4 className="text-xs font-black text-brand-ink uppercase tracking-wider flex items-center space-x-1.5">
-                              <span className="bg-brand-accent text-white px-2 py-0.5 rounded-sm font-black mr-1 text-[11px] font-sans">Paso 1</span>
-                              <span>Cargar Reporte de POS (PDF)</span>
+                              <span className="bg-zinc-800 text-white px-2 py-0.5 rounded-sm font-black mr-1 text-[10px] font-sans">Paso 1</span>
+                              <span>Cargar Reporte de POS</span>
                             </h4>
-                            <span className="text-[10px] bg-brand-accent/20 text-brand-ink border border-brand-ink/20 font-black px-2 py-0.5 uppercase font-sans">
-                              Lectura Automática
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-300 font-black px-2 py-0.5 uppercase font-sans">
+                                Opcional • Automatización
+                              </span>
+                              {posData && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPosData(null)}
+                                  className="text-[10px] text-zinc-500 hover:text-red-700 underline font-bold cursor-pointer transition-colors"
+                                >
+                                  Quitar reporte
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          <p className="text-xs text-brand-ink/70 font-semibold leading-relaxed">
-                            Suba el archivo PDF del reporte del sistema POS del día de cierre. El sistema extraerá de forma automática las ventas por canal y completará los canales de Justo, Rappi y Transferencias de este cierre.
+
+                          <p className="text-[11px] text-brand-ink/70 font-medium leading-relaxed">
+                            <strong>Ahorro de tiempo:</strong> Si tienes el reporte del POS (PDF, CSV o TXT), súbelo para extraer automáticamente las ventas por canal y novedades. <em>Si no cuentas con el reporte, este paso es 100% opcional y puedes auditar directamente en el Paso 2.</em>
                           </p>
-                          <PDFUploader cierre={currentCierre} onDataExtracted={handleDataExtracted} />
+
+                          <PDFUploader 
+                            cierre={currentCierre} 
+                            currentPOSData={posData}
+                            onDataExtracted={handleDataExtracted} 
+                            onClearData={() => setPosData(null)}
+                          />
                         </div>
 
                         {/* COMPONENT CONCILIATION: Side by side comparison with Manual input editing */}
-                        <div className="bg-white p-6 border-2 border-brand-ink space-y-6 shadow-[4px_4px_0px_0px_#1C1917]">
-                          <div className="flex justify-between items-center border-b border-brand-bg pb-3">
+                        <div className="bg-white p-4 sm:p-5 border-2 border-brand-ink space-y-5 shadow-[3px_3px_0px_0px_#1C1917]">
+                          <div className="flex justify-between items-center border-b border-brand-bg pb-2.5">
                             <h4 className="text-xs font-black text-brand-ink uppercase tracking-wider flex items-center space-x-1.5">
                               <span className="bg-brand-success text-white px-2 py-0.5 rounded-sm font-black mr-1 text-[11px] font-sans">Paso 2</span>
                               <span>Conciliación de Auditoría Real</span>
@@ -2726,7 +2761,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           </div>
 
                           <p className="text-xs text-brand-ink/70 font-semibold leading-relaxed">
-                            <strong>Instrucciones para el Admin:</strong> Revise los valores reportados por el sistema POS del PDF (Paso 1). Luego ingrese abajo lo que realmente reportan las plataformas (Rappi App, Justo App) y confirme el efectivo, datáfono y transferencias para realizar la conciliación exacta de desfases.
+                            <strong>Instrucciones para el Admin:</strong> Confirma o ajusta los valores reales a conciliar (Efectivo, Datáfono, Justo, Rappi y Transferencias) para calcular automáticamente el descuadre y aplicar la política de distribución.
                           </p>
 
                           {/* Tabla Comparativa en tiempo real */}
@@ -2747,7 +2782,9 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                 <tr>
                                   <td className="py-3 font-sans font-bold text-brand-ink">Efectivo</td>
                                   <td className="py-3 text-right text-brand-ink font-bold">{formatCOP(currentCierre.efectivoCierre)}</td>
-                                  <td className="py-3 text-right text-zinc-500 font-bold">{formatCOP(posData?.efectivoPOS || 0)}</td>
+                                  <td className="py-3 text-right text-zinc-500 font-bold">
+                                    {posData ? formatCOP(posData.efectivoPOS) : (currentCierre.efectivoPOS !== undefined && currentCierre.efectivoPOS !== null ? formatCOP(currentCierre.efectivoPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
+                                  </td>
                                   <td className="py-2 text-right">
                                     <div className="flex justify-end items-center">
                                       <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
@@ -2769,7 +2806,9 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                 <tr>
                                   <td className="py-3 font-sans font-bold text-brand-ink">Tarjetas / Datáfono</td>
                                   <td className="py-3 text-right text-brand-ink font-bold">{formatCOP(currentCierre.datafonoCierre)}</td>
-                                  <td className="py-3 text-right text-zinc-500 font-bold">{formatCOP(posData?.tarjetasPOS || 0)}</td>
+                                  <td className="py-3 text-right text-zinc-500 font-bold">
+                                    {posData ? formatCOP(posData.tarjetasPOS) : (currentCierre.tarjetasPOS !== undefined && currentCierre.tarjetasPOS !== null ? formatCOP(currentCierre.tarjetasPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
+                                  </td>
                                   <td className="py-2 text-right">
                                     <div className="flex justify-end items-center">
                                       <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
@@ -2794,7 +2833,9 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                     <p className="text-[9px] text-brand-ink/50 font-normal">Revisar Portal Justo</p>
                                   </td>
                                   <td className="py-3 text-right text-brand-ink font-bold">{formatCOP(currentCierre.justoCierre)}</td>
-                                  <td className="py-3 text-right text-zinc-500 font-bold">{formatCOP(posData?.justoPOS || 0)}</td>
+                                  <td className="py-3 text-right text-zinc-500 font-bold">
+                                    {posData ? formatCOP(posData.justoPOS) : (currentCierre.justoPOS !== undefined && currentCierre.justoPOS !== null ? formatCOP(currentCierre.justoPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
+                                  </td>
                                   <td className="py-2 text-right">
                                     <div className="flex justify-end items-center">
                                       <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
@@ -2808,7 +2849,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                     </div>
                                   </td>
                                   <td className="py-3 text-right font-bold">
-                                    {getDiferenciaBadge(reconcileJusto - (posData?.justoPOS || 0))}
+                                    {getDiferenciaBadge(reconcileJusto - (posData ? posData.justoPOS : (currentCierre.justoPOS ?? currentCierre.justoCierre ?? 0)))}
                                   </td>
                                 </tr>
 
@@ -2819,7 +2860,9 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                     <p className="text-[9px] text-brand-ink/50 font-normal">Revisar Portal Rappi</p>
                                   </td>
                                   <td className="py-3 text-right text-brand-ink font-bold">{formatCOP(currentCierre.rappiCierre)}</td>
-                                  <td className="py-3 text-right text-zinc-500 font-bold">{formatCOP(posData?.rappiPOS || 0)}</td>
+                                  <td className="py-3 text-right text-zinc-500 font-bold">
+                                    {posData ? formatCOP(posData.rappiPOS) : (currentCierre.rappiPOS !== undefined && currentCierre.rappiPOS !== null ? formatCOP(currentCierre.rappiPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
+                                  </td>
                                   <td className="py-2 text-right">
                                     <div className="flex justify-end items-center">
                                       <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
@@ -2833,7 +2876,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                     </div>
                                   </td>
                                   <td className="py-3 text-right font-bold">
-                                    {getDiferenciaBadge(reconcileRappi - (posData?.rappiPOS || 0))}
+                                    {getDiferenciaBadge(reconcileRappi - (posData ? posData.rappiPOS : (currentCierre.rappiPOS ?? currentCierre.rappiCierre ?? 0)))}
                                   </td>
                                 </tr>
 
@@ -2841,7 +2884,9 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                 <tr>
                                   <td className="py-3 font-sans font-bold text-brand-ink">Transferencias</td>
                                   <td className="py-3 text-right text-brand-ink font-bold">{formatCOP(currentCierre.transferenciasCierre || 0)}</td>
-                                  <td className="py-3 text-right text-zinc-500 font-bold">{formatCOP(posData?.transferenciasPOS || 0)}</td>
+                                  <td className="py-3 text-right text-zinc-500 font-bold">
+                                    {posData ? formatCOP(posData.transferenciasPOS) : (currentCierre.transferenciasPOS !== undefined && currentCierre.transferenciasPOS !== null ? formatCOP(currentCierre.transferenciasPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
+                                  </td>
                                   <td className="py-2 text-right">
                                     <div className="flex justify-end items-center">
                                       <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
@@ -2855,7 +2900,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                     </div>
                                   </td>
                                   <td className="py-3 text-right font-bold">
-                                    {getDiferenciaBadge(reconcileTransferencias - (posData?.transferenciasPOS || 0))}
+                                    {getDiferenciaBadge(reconcileTransferencias - (posData ? posData.transferenciasPOS : (currentCierre.transferenciasPOS ?? currentCierre.transferenciasCierre ?? 0)))}
                                   </td>
                                 </tr>
 
@@ -2877,11 +2922,15 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
                           {/* SECCIÓN DEL EQUIPO DEL TURNO Y DISTRIBUCIÓN DE DESCUADRES (POLÍTICA 60/40) */}
                           {(() => {
+                            const posJ = posData ? posData.justoPOS : (currentCierre.justoPOS ?? currentCierre.justoCierre ?? 0);
+                            const posR = posData ? posData.rappiPOS : (currentCierre.rappiPOS ?? currentCierre.rappiCierre ?? 0);
+                            const posT = posData ? posData.transferenciasPOS : (currentCierre.transferenciasPOS ?? currentCierre.transferenciasCierre ?? 0);
+
                             const totalDif = (currentCierre.efectivoCierre - reconcileEfectivo) +
                                              (currentCierre.datafonoCierre - reconcileDatafono) +
-                                             (reconcileJusto - (posData?.justoPOS || 0)) +
-                                             (reconcileRappi - (posData?.rappiPOS || 0)) +
-                                             (reconcileTransferencias - (posData?.transferenciasPOS || 0));
+                                             (reconcileJusto - posJ) +
+                                             (reconcileRappi - posR) +
+                                             (reconcileTransferencias - posT);
 
                             const shortage = totalDif < 0 ? Math.abs(totalDif) : 0;
                             const shareLider = Math.round(shortage * 0.6);
@@ -3055,11 +3104,15 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
                           {/* Resumen Final de Conciliación */}
                           {(() => {
+                            const posJ = posData ? posData.justoPOS : (currentCierre.justoPOS ?? currentCierre.justoCierre ?? 0);
+                            const posR = posData ? posData.rappiPOS : (currentCierre.rappiPOS ?? currentCierre.rappiCierre ?? 0);
+                            const posT = posData ? posData.transferenciasPOS : (currentCierre.transferenciasPOS ?? currentCierre.transferenciasCierre ?? 0);
+
                             const totalDif = (currentCierre.efectivoCierre - reconcileEfectivo) +
                                              (currentCierre.datafonoCierre - reconcileDatafono) +
-                                             (reconcileJusto - (posData?.justoPOS || 0)) +
-                                             (reconcileRappi - (posData?.rappiPOS || 0)) +
-                                             (reconcileTransferencias - (posData?.transferenciasPOS || 0));
+                                             (reconcileJusto - posJ) +
+                                             (reconcileRappi - posR) +
+                                             (reconcileTransferencias - posT);
 
                             return (
                               <div className="bg-brand-bg border-2 border-brand-ink p-4 flex flex-col sm:flex-row justify-between items-center gap-3 shadow-[2px_2px_0px_0px_#1C1917]">
@@ -4705,7 +4758,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                 </div>
 
                 <form 
-                  onSubmit={(e) => {
+                  onSubmit={async (e) => {
                     e.preventDefault();
                     const nameClean = newMemberName.trim();
                     if (!nameClean) {
@@ -4718,55 +4771,53 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                     }
 
                     const calculatedPoints = getRolePoints(newMemberRole);
-                    const newMember = {
-                      nombre: nameClean,
-                      cedula: newMemberCedula.trim(),
-                      password: newMemberPassword,
-                      role: newMemberRole as any,
-                      local: "Chapinero",
-                      puntosPropinas: calculatedPoints,
-                      aptoPropinas: newMemberIsEligible,
-                      activo: true
-                    };
+                    const isPasteleria = newMemberRole.toLowerCase().includes("pasteler") || newMemberRole.toLowerCase().includes("cocina");
 
-                    saveTeamMembers([...teamMembers, newMember]);
-
-                    // Conectar automáticamente al módulo de Salarios y Liquidación
                     try {
-                      const existingSalaries = JSON.parse(localStorage.getItem("lopez_gracia_salaries_config") || "{}");
-                      const smmlv = Number(localStorage.getItem("lopez_gracia_smmlv_base")) || 1750905;
-                      const isPasteleria = newMemberRole.toLowerCase().includes("pasteler") || newMemberRole.toLowerCase().includes("cocina");
-
-                      existingSalaries[nameClean] = {
+                      const saved = await dbAdapter.saveTeamMember({
                         nombre: nameClean,
                         cedula: newMemberCedula.trim(),
-                        role: newMemberRole,
-                        area: isPasteleria ? "Pastelería" : "Ventas",
-                        salarioBaseMensual: smmlv,
-                        tipoContrato: "Indefinido",
-                        auxilioTransporteAplica: true,
-                        informacionParticular: "",
-                        bonoFijoQuincenal: 0,
-                        descuentoFijoQuincenal: 0,
-                        puntajePropinas: calculatedPoints,
-                        bonosConfigurados: [],
-                        diaDescansoContractual: "Domingo",
-                        horarioSemanal: [
-                          { dia: "Lunes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
-                          { dia: "Martes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
-                          { dia: "Miércoles", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
-                          { dia: "Jueves", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
-                          { dia: "Viernes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
-                          { dia: "Sábado", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
-                          { dia: "Domingo", horaEntrada: "00:00", horaSalida: "00:00", activo: false, horasCalculadas: 0 }
-                        ]
-                      };
-                      localStorage.setItem("lopez_gracia_salaries_config", JSON.stringify(existingSalaries));
-                    } catch (err) {
-                      console.error("Error al sincronizar con salarios:", err);
-                    }
+                        role: newMemberRole as any,
+                        cargo: newMemberRole as any,
+                        local: local,
+                        puntosPropinas: calculatedPoints,
+                        aptoPropinas: newMemberIsEligible,
+                        activo: true
+                      }, local);
 
-                    alert(`¡Colaborador "${nameClean}" registrado con éxito y conectado al módulo de Salarios!`);
+                      if (saved?.id) {
+                        await dbAdapter.saveNominaConfig(saved.id, {
+                          nombre: nameClean,
+                          cedula: newMemberCedula.trim(),
+                          role: newMemberRole,
+                          area: isPasteleria ? "Pastelería" : "Ventas",
+                          salarioBaseMensual: smmlvBase,
+                          tipoContrato: "Indefinido",
+                          auxilioTransporteAplica: true,
+                          informacionParticular: "",
+                          bonoFijoQuincenal: 0,
+                          descuentoFijoQuincenal: 0,
+                          puntajePropinas: calculatedPoints,
+                          bonosConfigurados: [],
+                          diaDescansoContractual: "Domingo",
+                          horarioSemanal: [
+                            { dia: "Lunes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
+                            { dia: "Martes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
+                            { dia: "Miércoles", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
+                            { dia: "Jueves", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
+                            { dia: "Viernes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
+                            { dia: "Sábado", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
+                            { dia: "Domingo", horaEntrada: "00:00", horaSalida: "00:00", activo: false, horasCalculadas: 0 }
+                          ]
+                        });
+                      }
+
+                      await loadTeamMembers();
+                      alert(`¡Colaborador "${nameClean}" registrado con éxito en Supabase y conectado al módulo de Salarios!`);
+                    } catch (err: any) {
+                      console.error("Error al registrar colaborador en Supabase:", err);
+                      alert("Error al registrar colaborador: " + (err?.message || ""));
+                    }
                     
                     // Resetear formulario
                     setNewMemberName("");

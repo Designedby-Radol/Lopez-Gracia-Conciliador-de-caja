@@ -19,38 +19,39 @@ El sistema para **López & Gracia** es una plataforma web integral diseñada par
 
 ## 2. Arquitectura Tecnológica
 
-El aplicativo implementa una arquitectura híbrida moderna que combina un frontend reactivo en Single Page Application (SPA), un backend servidor en Node.js/Express, y persistencia distribuida con Firebase Firestore.
+El aplicativo implementa una arquitectura cliente-servidor moderna de alto rendimiento que combina una Single Page Application (SPA) en el frontend, un backend servidor en Node.js/Express, y persistencia relacional en la nube con **Supabase (PostgreSQL 15+)** y **Supabase Auth**.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                       CLIENTE (SPA)                         │
 │  React 19 + TypeScript + Tailwind CSS v4 + Motion           │
 │  - ManagerDashboard, OperationalChecklist, SalariesManager  │
-│  - PDFUploader (pdfjs-dist), jsPDF, XLSX                    │
+│  - CollaboratorInflow, IndicadoresDashboard, PDFUploader     │
+│  - pdfjs-dist, jsPDF, XLSX                                  │
 └──────────────────────────────┬──────────────────────────────┘
                                │
                 REST / JSON    │  Lecturas & Escrituras
-                               │  Directas a BD
+                               │  Directas a Supabase
                                ▼
 ┌──────────────────────────────┴──────────────────────────────┐
 │                  BACKEND (server.ts - Node.js)              │
-│  - Express 4.x sobre puerto 3000                            │
+│  - Express 4.x sobre puerto 3000 (0.0.0.0:3000)             │
 │  - Vite Middleware (Desarrollo) / Static Server (Producción)│
-│  - POST /api/gemini/laboral (Google GenAI SDK)              │
-│    -> Modelo: gemini-3.6-flash                              │
-│    -> Contexto: Código Sustantivo del Trabajo (Colombia)    │
+│  - POST /api/gemini/laboral (Google GenAI SDK - Gemini)     │
+│  - GET/POST /api/pos/justo (Integración API Justo)          │
+│  - GET/POST /api/pos/intuipos (Integración API IntuiPOS)    │
+│  - POST /api/pos/sync-closure (Sincronización de Cierre)    │
 └──────────────────────────────┬──────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                 PERSISTENCIA & BASE DE DATOS                │
-│  Firebase Firestore (migrado desde Supabase)                │
-│  - Colección: cierres_caja/{cierreId}                       │
-│  - Configuración: firebaseConfig.ts                         │
+│  Supabase (PostgreSQL Relacional + Supabase Auth)           │
+│  - Tablas: locales, usuarios, cierres_caja, nomina_config,  │
+│            turnos_nomina, configuracion_nomina              │
+│  - Configuración: supabaseConfig.ts (URL + Anon Key)        │
 │  - Capa de abstracción: dbAdapter.ts                        │
-│  - Reglas de seguridad: firestore.rules                     │
-│  - Esquema estructurado: firebase-blueprint.json            │
-│  - Caché de sesión: localStorage (roles, sedes, checklists) │
+│  - Autenticación: Supabase Auth (Email/Contraseña/Cédula)   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -68,11 +69,21 @@ El aplicativo implementa una arquitectura híbrida moderna que combina un fronte
      - *Desarrollo*: Integración de Vite en modo middleware (`createViteServer`) con soporte de TypeScript vía `tsx`.
      - *Producción*: Empaquetado optimizado mediante `esbuild` a un bundle CommonJS (`dist/server.cjs`) sirviendo los estáticos generados en `dist/`.
    - Proxy seguro para el SDK de IA: Ninguna clave de API de Google Gemini queda expuesta al navegador.
+   - Endpoints de integración POS con APIs externas:
+     - `/api/pos/justo`: Obtención de órdenes y ventas de la plataforma Justo.
+     - `/api/pos/intuipos`: Sincronización de reportes Z y transaccionales de IntuiPOS.
+     - `/api/pos/sync-closure`: Cruce unificado y consolidación de auditoría.
 
-3. **Capa de Persistencia y Base de Datos**:
-   - **Firebase Firestore**: Base de datos NoSQL documental en la nube para sincronización multi-dispositivo y auditoría centralizada.
-   - **`dbAdapter.ts`**: Patrón de diseño Adapter que unifica los métodos `getAllCierres`, `addCierre`, `updateCierre`, `deleteCierre`, facilitando mantenimiento sin acoplar la UI a la API interna de Firebase.
-   - **`localStorage`**: Utilizado para persistencia local de estado de sesión (rol, nombre, sede activa) y respaldo inmediato de checklists y configuraciones de personal ante desconexiones de red.
+3. **Capa de Persistencia y Base de Datos (Supabase)**:
+   - **Motor Relacional**: PostgreSQL con integridad referencial, índices y tipos enum (`cargo`, `access_role`, `estado_cierre`).
+   - **`dbAdapter.ts`**: Patrón de diseño Adapter que encapsula toda la interacción con Supabase:
+     - Gestión de sedes/locales (`locales`).
+     - Gestión de equipo y roles (`usuarios`).
+     - Cuadres y auditorías de caja (`cierres_caja`).
+     - Configuraciones individuales de nómina (`nomina_config`).
+     - Historial y liquidaciones quincenales (`turnos_nomina`).
+     - Parámetros macro de nómina (`configuracion_nomina`: SMMLV y Auxilio de Transporte).
+   - **Seguridad**: Autenticación centralizada mediante Supabase Auth para colaboradores y gerentes.
 
 4. **Integración con Inteligencia Artificial (Google Gemini)**:
    - Uso de la librería oficial `@google/genai` con el modelo de alta velocidad y razonamiento `gemini-3.6-flash`.
@@ -96,10 +107,13 @@ $$\text{Diferencia} = \text{Valor Arqueo Físico} - \text{Valor Reporte POS}$$
 | **Rappi** | Reporte de cierre del portal Rappi Aliados | Facturación Rappi en POS | Descuadre por comisiones, cancelaciones o pedidos pendientes. |
 | **Transferencias** | Comprobantes de Nequi, Daviplata o Bancolombia | Facturación por transferencias en POS | Comprobantes duplicados o transferencias no confirmadas. |
 
-#### Política de Descuadres (Regla 60/40)
-Cuando se registra un **faltante de efectivo**, el sistema aplica automáticamente la política de responsabilidad compartida:
-- **60% del descuadre**: Asignado al **Líder Operador / Líder de Punto** en turno, como responsable principal de la caja.
-- **40% del descuadre**: Distribuido equitativamente entre los **Auxiliares / Asistentes** que estuvieron en el turno.
+#### Política de Descuadres (Regla 60/40 con Validación de Roles)
+Cuando se registra un **faltante de efectivo**, el sistema aplica automáticamente la política de responsabilidad compartida con segregación estricta de funciones operativas:
+- **60% del descuadre**: Asignado al **Líder Operador / Líder de Punto** en turno, como custodio y responsable principal del dinero en caja.
+- **40% del descuadre**: Distribuido equitativamente entre los **Auxiliares / Asistentes de Servicio** que estuvieron presentes en el turno manipulando la registradora.
+- **Roles Excluidos de Deducción por Descuadre**:
+  - **Gerencia / Administrador**: No manipulan caja registradora en el turno operativo.
+  - **Líder de Pastelería y Auxiliares de Cocina/Pastelería**: Su responsabilidad funcional es la producción, horneado y mise en place, por lo cual la normativa interna los exonera de asumir deducciones por faltantes en caja registradora.
 
 ---
 
@@ -242,35 +256,34 @@ Operativo y Arqueo Diario         y Operación Diaria               Gerencial Co
 
 ```
 /
-├── server.ts                       # Servidor Express, endpoints de IA Gemini y middleware Vite
-├── firebase-blueprint.json         # Definición de entidades y esquema de Firestore
-├── firestore.rules                 # Reglas de seguridad para Firestore
-├── package.json                    # Dependencias y scripts de construcción
+├── server.ts                       # Servidor Express, endpoints de IA Gemini y APIs POS (Justo/IntuiPOS)
+├── package.json                    # Dependencias y scripts de construcción (dev, build, start)
 ├── metadata.json                   # Metadatos del applet de AI Studio
+├── CONTEXTO_PROYECTO.md            # Documentación maestra técnica y de negocio
 │
 ├── src/
-│   ├── App.tsx                     # Enrutador principal y control de sesión con persistencia
+│   ├── App.tsx                     # Enrutador principal, autenticación y estado global de sesión
 │   ├── main.tsx                    # Punto de entrada de React 19
 │   ├── index.css                   # Importación y configuración de Tailwind CSS v4
 │   ├── types.ts                    # Modelos TypeScript: User, CierreCaja, UserRole, POSReport
 │   │
 │   ├── db/
-│   │   ├── firebaseConfig.ts       # Inicialización y exports de Firebase Firestore y Auth
-│   │   └── dbAdapter.ts            # Adaptador CRUD desacoplado para cierres_caja
+│   │   ├── supabaseConfig.ts       # Inicialización del cliente de Supabase JS
+│   │   └── dbAdapter.ts            # Adaptador CRUD desacoplado para PostgreSQL (cierres, equipo, nómina)
 │   │
 │   ├── utils/
 │   │   ├── colombiaHolidays.ts     # Ley Emiliani, Pascua (Butcher/Meeus) y tareas dinámicas
-│   │   └── colombianPayroll.ts     # Fórmulas de nómina, jornada 42h y recargos 2026
+│   │   └── colombianPayroll.ts     # Fórmulas de nómina, jornada 42h, recargos y parser POS (PDF/Excel)
 │   │
 │   └── components/
 │       ├── Login.tsx               # Selector de roles, nombre y sede de trabajo
 │       ├── ManagerDashboard.tsx    # Dashboard gerencial: KPIs, conciliación, auditoría y propinas
 │       ├── OperationalChecklist.tsx# Checklist de apertura/cierre sincronizado con festivos
 │       ├── PDFUploader.tsx         # Drag & Drop y parser de reportes POS con pdfjs
-│       ├── SalariesManager.tsx     # Nómina quincenal, cálculo de horas y consulta con IA
+│       ├── SalariesManager.tsx     # Nómina quincenal, cálculo de horas y consulta con IA en Supabase
 │       ├── IndicadoresDashboard.tsx# Visualización de métricas y tendencias de venta
 │       ├── InventoryClosure.tsx    # Cuadre de mermas e inventarios al cierre
-│       ├── CollaboratorInflow.tsx  # Vista simplificada para colaboradores en tienda
+│       ├── CollaboratorInflow.tsx  # Vista para colaboradores, turnos, propinas y cambio de contraseña
 │       └── Logo.tsx                # Logotipo e isotipo de López & Gracia
 ```
 

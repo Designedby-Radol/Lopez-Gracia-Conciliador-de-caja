@@ -50,6 +50,7 @@ import {
   parsePosExcelFile,
   generatePayrollTirillaJson
 } from "../utils/colombianPayroll";
+import { dbAdapter } from "../db/dbAdapter";
 
 // Set up PDF worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -258,31 +259,11 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
   // Pestañas principales
   const [activeSubTab, setActiveSubTab] = useState<"config" | "liquidation" | "history">("liquidation");
 
-  // Configuración de salarios guardada en localStorage
-  const [salariesConfig, setSalariesConfig] = useState<Record<string, EmployeeSalaryConfig>>(() => {
-    const saved = localStorage.getItem("lopez_gracia_salaries_config");
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return {};
-      }
-    }
-    return {};
-  });
+  // Configuración de salarios sincronizada con Supabase
+  const [salariesConfig, setSalariesConfig] = useState<Record<string, EmployeeSalaryConfig>>({});
 
-  // Historial de liquidaciones guardadas
-  const [savedHistory, setSavedHistory] = useState<SavedSettlementRecord[]>(() => {
-    const saved = localStorage.getItem("lopez_gracia_salaries_history");
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return [];
-      }
-    }
-    return [];
-  });
+  // Historial de liquidaciones guardadas en Supabase
+  const [savedHistory, setSavedHistory] = useState<SavedSettlementRecord[]>([]);
 
   // Novedades temporales para simular/liquidar la quincena
   const [quincenaNovedades, setQuincenaNovedades] = useState<Record<string, QuincenaNovedades>>({});
@@ -325,23 +306,54 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
   const [historySearchTerm, setHistorySearchTerm] = useState("");
   const [historyFilterMember, setHistoryFilterMember] = useState("TODOS");
 
-  // Salario Mínimo y Aux. Transporte
-  const [smmlvBase, setSmmlvBase] = useState<number>(() => {
-    const saved = localStorage.getItem("lopez_gracia_smmlv_base");
-    return saved ? Number(saved) : 1750905;
-  });
+  // Salario Mínimo y Aux. Transporte (parametrizables vía Supabase)
+  const [smmlvBase, setSmmlvBase] = useState<number>(1750905);
+  const [auxTransporteBase, setAuxTransporteBase] = useState<number>(249095);
 
-  const [auxTransporteBase, setAuxTransporteBase] = useState<number>(() => {
-    const saved = localStorage.getItem("lopez_gracia_aux_transp_base");
-    return saved ? Number(saved) : 249095;
-  });
+  // Carga inicial desde Supabase
+  useEffect(() => {
+    dbAdapter.getAllNominaConfigs().then((configs) => {
+      if (configs && Object.keys(configs).length > 0) {
+        setSalariesConfig(configs);
+      }
+    }).catch((e) => console.error("Error al cargar nóminas de Supabase:", e));
 
-  // Guardar en localStorage SMMLV y Aux. Transporte
+    dbAdapter.getConfiguracionNomina("Chapinero").then((cfg) => {
+      if (cfg) {
+        if (cfg.smmlv_base) setSmmlvBase(Number(cfg.smmlv_base));
+        if (cfg.aux_transporte_base) setAuxTransporteBase(Number(cfg.aux_transporte_base));
+      }
+    }).catch((e) => console.error("Error al cargar configuración de nómina de Supabase:", e));
+
+    dbAdapter.getTurnosNomina("Chapinero").then((turnos) => {
+      if (turnos && turnos.length > 0) {
+        const records: SavedSettlementRecord[] = turnos.map((t) => ({
+          id: t.id,
+          fechaRegistro: t.createdAt || new Date().toISOString(),
+          periodoInicio: t.fechaInicio || "",
+          periodoFin: t.fechaFin || "",
+          quincenaNombre: t.quincenaNombre || "Liquidación",
+          empleadoNombre: t.nombre || "",
+          cargo: t.cargo || "",
+          tipoContrato: (t.liquidacion?.tipoContrato as any) || "Indefinido",
+          area: (t.liquidacion?.area as any) || "Ventas",
+          diasLaborados: t.liquidacion?.diasLaboradosTotales || 0,
+          diasAsistidos: t.liquidacion?.diasAsistidosEfectivos || 0,
+          devengadoTotal: Number(t.liquidacion?.devengadoTotal || 0),
+          deduccionesTotal: Number(t.liquidacion?.totalDeducciones || 0),
+          netoAPagar: Number(t.liquidacion?.netoAPagar || 0),
+          desglose: t.liquidacion || {}
+        }));
+        setSavedHistory(records);
+      }
+    }).catch((e) => console.error("Error al cargar historial de liquidaciones de Supabase:", e));
+  }, []);
+
+  // Guardar en Supabase SMMLV y Aux. Transporte
   const handleUpdateSmmlvGlobal = (newSmmlv: number, newAuxTransp: number) => {
     setSmmlvBase(newSmmlv);
     setAuxTransporteBase(newAuxTransp);
-    localStorage.setItem("lopez_gracia_smmlv_base", newSmmlv.toString());
-    localStorage.setItem("lopez_gracia_aux_transp_base", newAuxTransp.toString());
+    dbAdapter.saveConfiguracionNomina("Chapinero", newSmmlv, newAuxTransp).catch(e => console.error("Error al guardar config nómina:", e));
   };
 
   // Obtener o inicializar la configuración de un colaborador
@@ -429,7 +441,11 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
         ...prev,
         [name]: updated
       };
-      localStorage.setItem("lopez_gracia_salaries_config", JSON.stringify(newConfig));
+      
+      const member = teamMembers.find(m => m.nombre === name);
+      if (member?.id) {
+        dbAdapter.saveNominaConfig(member.id, updated).catch(e => console.error("Error guardando nómina config en Supabase:", e));
+      }
       return newConfig;
     });
   };
@@ -538,11 +554,22 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
     });
   };
 
-  // Guardar configuración general
-  const handleSaveAllConfig = () => {
-    localStorage.setItem("lopez_gracia_salaries_config", JSON.stringify(salariesConfig));
-    setSaveSuccessMsg(true);
-    setTimeout(() => setSaveSuccessMsg(false), 3000);
+  // Guardar configuración general en Supabase
+  const handleSaveAllConfig = async () => {
+    try {
+      for (const [name, cfg] of Object.entries(salariesConfig)) {
+        const member = teamMembers.find(m => m.nombre === name);
+        if (member?.id) {
+          await dbAdapter.saveNominaConfig(member.id, cfg);
+        }
+      }
+      await dbAdapter.saveConfiguracionNomina("Chapinero", smmlvBase, auxTransporteBase);
+      setSaveSuccessMsg(true);
+      setTimeout(() => setSaveSuccessMsg(false), 3000);
+    } catch (e) {
+      console.error("Error al guardar nómina general en Supabase:", e);
+      alert("Hubo un error al guardar la configuración en Supabase.");
+    }
   };
 
   // FORMATEADOR COP
@@ -1135,17 +1162,44 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
     const updatedHistory = [...newRecords, ...savedHistory];
     setSavedHistory(updatedHistory);
-    localStorage.setItem("lopez_gracia_salaries_history", JSON.stringify(updatedHistory));
 
-    alert(`💾 ¡Liquidación de la quincena "${quincenaNombre}" guardada exitosamente en el historial! Total colaboradores procesados: ${teamMembers.length}.`);
+    // Guardar en Supabase turnos_nomina
+    for (const rec of newRecords) {
+      const member = teamMembers.find(m => m.nombre === rec.empleadoNombre);
+      if (member?.id) {
+        dbAdapter.saveTurnoNomina({
+          usuarioId: member.id,
+          localNameOrId: "Chapinero",
+          fechaInicio: rec.periodoInicio,
+          fechaFin: rec.periodoFin,
+          quincenaNombre: rec.quincenaNombre,
+          liquidacion: {
+            tipoContrato: rec.tipoContrato,
+            area: rec.area,
+            diasLaboradosTotales: rec.diasLaborados,
+            diasAsistidosEfectivos: rec.diasAsistidos,
+            devengadoTotal: rec.devengadoTotal,
+            totalDeducciones: rec.deduccionesTotal,
+            netoAPagar: rec.netoAPagar,
+            ...rec.desglose
+          }
+        }).catch(e => console.error("Error al guardar turno de nómina en Supabase:", e));
+      }
+    }
+
+    alert(`💾 ¡Liquidación de la quincena "${quincenaNombre}" guardada exitosamente en Supabase! Total colaboradores procesados: ${teamMembers.length}.`);
   };
 
   // ELIMINAR REGISTRO DE HISTORIAL
-  const handleDeleteHistoryRecord = (id: string) => {
+  const handleDeleteHistoryRecord = async (id: string) => {
     if (confirm("¿Estás seguro de eliminar este registro del historial de pagos?")) {
       const updated = savedHistory.filter(r => r.id !== id);
       setSavedHistory(updated);
-      localStorage.setItem("lopez_gracia_salaries_history", JSON.stringify(updated));
+      try {
+        await dbAdapter.deleteTurnoNomina(id);
+      } catch (e) {
+        console.error("Error al eliminar turno nómina en Supabase:", e);
+      }
     }
   };
 
