@@ -23,6 +23,157 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJh
 
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+// ---- HELPERS DE SEGURIDAD Y AUDITORÍA EN SUPABASE ----
+async function getSecurityConfigFromSupabase(): Promise<{ passwords: Record<string, string>; statuses: Record<string, "active" | "suspended"> }> {
+  try {
+    const { data } = await supabaseAdmin
+      .from("cierres_caja")
+      .select("id, novedades")
+      .eq("pos_file_name", "SYSTEM_SECURITY_CONFIG")
+      .limit(1)
+      .maybeSingle();
+
+    if (data?.novedades) {
+      const parsed = JSON.parse(data.novedades);
+      return {
+        passwords: parsed.passwords || {},
+        statuses: parsed.statuses || {}
+      };
+    }
+  } catch (err) {
+    console.error("Error leyendo configuración de seguridad en Supabase:", err);
+  }
+  return { passwords: {}, statuses: {} };
+}
+
+async function saveSecurityConfigToSupabase(config: { passwords: Record<string, string>; statuses: Record<string, "active" | "suspended"> }) {
+  try {
+    const { data: user } = await supabaseAdmin.from("usuarios").select("id").limit(1).single();
+    const { data: local } = await supabaseAdmin.from("locales").select("id").limit(1).single();
+    if (!user?.id || !local?.id) return false;
+
+    const { data: existing } = await supabaseAdmin
+      .from("cierres_caja")
+      .select("id")
+      .eq("pos_file_name", "SYSTEM_SECURITY_CONFIG")
+      .limit(1)
+      .maybeSingle();
+
+    const payload = {
+      colaborador_id: user.id,
+      local_id: local.id,
+      fecha: "1970-01-02",
+      estado: "Anulado",
+      pos_file_name: "SYSTEM_SECURITY_CONFIG",
+      efectivo_cierre: 0,
+      datafono_cierre: 0,
+      justo_cierre: 0,
+      rappi_cierre: 0,
+      transferencias_cierre: 0,
+      novedades: JSON.stringify(config)
+    };
+
+    if (existing?.id) {
+      await supabaseAdmin.from("cierres_caja").update({ novedades: JSON.stringify(config) }).eq("id", existing.id);
+    } else {
+      await supabaseAdmin.from("cierres_caja").insert(payload);
+    }
+    return true;
+  } catch (err) {
+    console.error("Error guardando configuración de seguridad en Supabase:", err);
+    return false;
+  }
+}
+
+async function getAuditLogsFromSupabase(): Promise<any[]> {
+  try {
+    const { data } = await supabaseAdmin
+      .from("cierres_caja")
+      .select("id, created_at, novedades")
+      .eq("pos_file_name", "SYSTEM_AUDIT_LOG")
+      .limit(1)
+      .maybeSingle();
+
+    if (!data?.novedades) return [];
+
+    const parsed = JSON.parse(data.novedades);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    } else if (typeof parsed === "object" && parsed !== null) {
+      return [parsed];
+    }
+    return [];
+  } catch (err) {
+    console.error("Error cargando auditoría de Supabase:", err);
+    return [];
+  }
+}
+
+async function logSecurityAuditToSupabase(entry: {
+  action: string;
+  targetUser: string;
+  executedBy: string;
+  description: string;
+  status?: "success" | "warning" | "error";
+  ip?: string;
+  device?: string;
+}) {
+  try {
+    const { data: user } = await supabaseAdmin.from("usuarios").select("id").limit(1).single();
+    const { data: local } = await supabaseAdmin.from("locales").select("id").limit(1).single();
+    if (!user?.id || !local?.id) return;
+
+    const auditPayload = {
+      id: "sec-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
+      timestamp: new Date().toISOString(),
+      ...entry,
+      status: entry.status || "success"
+    };
+
+    const { data: existing } = await supabaseAdmin
+      .from("cierres_caja")
+      .select("id, novedades")
+      .eq("pos_file_name", "SYSTEM_AUDIT_LOG")
+      .limit(1)
+      .maybeSingle();
+
+    let existingLogs: any[] = [];
+    if (existing?.novedades) {
+      try {
+        const parsed = JSON.parse(existing.novedades);
+        existingLogs = Array.isArray(parsed) ? parsed : [parsed];
+      } catch {
+        existingLogs = [];
+      }
+    }
+
+    const updatedLogs = [auditPayload, ...existingLogs].slice(0, 500);
+
+    if (existing?.id) {
+      await supabaseAdmin
+        .from("cierres_caja")
+        .update({ novedades: JSON.stringify(updatedLogs) })
+        .eq("id", existing.id);
+    } else {
+      await supabaseAdmin.from("cierres_caja").insert({
+        colaborador_id: user.id,
+        local_id: local.id,
+        fecha: "1970-01-01",
+        estado: "Anulado",
+        pos_file_name: "SYSTEM_AUDIT_LOG",
+        efectivo_cierre: 0,
+        datafono_cierre: 0,
+        justo_cierre: 0,
+        rappi_cierre: 0,
+        transferencias_cierre: 0,
+        novedades: JSON.stringify(updatedLogs)
+      });
+    }
+  } catch (err) {
+    console.error("Error registrando log de auditoría en Supabase:", err);
+  }
+}
+
 async function startServer() {
   const app = express();
   app.use(express.json());
@@ -60,8 +211,67 @@ async function startServer() {
       });
 
       if (!matched) {
+        await logSecurityAuditToSupabase({
+          action: "LOGIN_FAILED",
+          targetUser: clean,
+          executedBy: "Sistema Auth",
+          description: "Intento de inicio de sesión con identificador o cédula inexistente.",
+          status: "warning",
+          ip: req.ip || req.headers["x-forwarded-for"]?.toString()
+        });
         return res.status(404).json({ success: false, error: "Usuario o documento no encontrado en el sistema." });
       }
+
+      // Validar si la cuenta está suspendida en Supabase
+      const userKey = (matched.cedula || matched.nombre).trim().toLowerCase();
+      const secConfig = await getSecurityConfigFromSupabase();
+      const userStatus = secConfig.statuses?.[userKey] || secConfig.statuses?.[matched.nombre.toLowerCase()] || "active";
+
+      if (userStatus === "suspended") {
+        await logSecurityAuditToSupabase({
+          action: "LOGIN_BLOCKED_SUSPENDED",
+          targetUser: matched.nombre,
+          executedBy: "Sistema Auth",
+          description: "Acceso bloqueado en tiempo real: La cuenta se encuentra suspendida en Supabase.",
+          status: "error",
+          ip: req.ip || req.headers["x-forwarded-for"]?.toString()
+        });
+        return res.status(403).json({ 
+          success: false, 
+          error: "Esta cuenta se encuentra suspendida por la administración. Comunícate con Gerencia." 
+        });
+      }
+
+      // Validar contraseña / PIN si se proporcionó
+      const expectedPassword = 
+        secConfig.passwords?.[userKey] || 
+        secConfig.passwords?.[matched.nombre.toLowerCase()] ||
+        (matched.role === "administrador" || matched.cargo === "Gerencia" ? "admin123" : "tienda");
+
+      if (password !== undefined && password !== null && String(password).trim() !== "") {
+        const inputPass = String(password).trim();
+        if (inputPass !== expectedPassword) {
+          await logSecurityAuditToSupabase({
+            action: "LOGIN_FAILED",
+            targetUser: matched.nombre,
+            executedBy: "Sistema Auth",
+            description: "Intento de inicio de sesión con clave o PIN incorrecto.",
+            status: "warning",
+            ip: req.ip || req.headers["x-forwarded-for"]?.toString()
+          });
+          return res.status(401).json({ success: false, error: "Contraseña o PIN incorrecto." });
+        }
+      }
+
+      // Registro de inicio exitoso en auditoría de Supabase
+      await logSecurityAuditToSupabase({
+        action: "LOGIN_SUCCESS",
+        targetUser: matched.nombre,
+        executedBy: matched.nombre,
+        description: `Inicio de sesión exitoso como ${matched.cargo} (${matched.role}).`,
+        status: "success",
+        ip: req.ip || req.headers["x-forwarded-for"]?.toString()
+      });
 
       const localNombre = matched.locales?.nombre || "Chapinero";
 
@@ -72,11 +282,111 @@ async function startServer() {
           nombre: matched.nombre,
           cargo: matched.cargo,
           role: matched.role,
-          local: localNombre
+          local: localNombre,
+          cedula: matched.cedula
         }
       });
     } catch (err: any) {
       console.error("Error en POST /api/auth/login:", err);
+      res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // ---- ENDPOINTS DE SEGURIDAD & AUDITORÍA EN SUPABASE ----
+  app.get("/api/db/security-config", async (_req, res) => {
+    try {
+      const config = await getSecurityConfigFromSupabase();
+      res.json({ success: true, data: config });
+    } catch (err: any) {
+      console.error("Error en GET /api/db/security-config:", err);
+      res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  app.post("/api/db/security-config", async (req, res) => {
+    try {
+      const { passwords, statuses } = req.body || {};
+      const current = await getSecurityConfigFromSupabase();
+      const updated = {
+        passwords: { ...(current.passwords || {}), ...(passwords || {}) },
+        statuses: { ...(current.statuses || {}), ...(statuses || {}) }
+      };
+
+      const ok = await saveSecurityConfigToSupabase(updated);
+      if (!ok) throw new Error("No se pudo guardar la configuración de seguridad en Supabase");
+      res.json({ success: true, data: updated });
+    } catch (err: any) {
+      console.error("Error en POST /api/db/security-config:", err);
+      res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  app.get("/api/db/security-audit", async (_req, res) => {
+    try {
+      const logs = await getAuditLogsFromSupabase();
+      res.json({ success: true, data: logs });
+    } catch (err: any) {
+      console.error("Error en GET /api/db/security-audit:", err);
+      res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  app.post("/api/db/security-audit", async (req, res) => {
+    try {
+      const { action, targetUser, executedBy, description, status } = req.body || {};
+      if (!action || !targetUser) {
+        return res.status(400).json({ success: false, error: "Datos de auditoría incompletos" });
+      }
+
+      await logSecurityAuditToSupabase({
+        action,
+        targetUser,
+        executedBy: executedBy || "Gerencia",
+        description: description || "Acción de seguridad ejecutada",
+        status: status || "success",
+        ip: req.ip || req.headers["x-forwarded-for"]?.toString()
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error en POST /api/db/security-audit:", err);
+      res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  app.patch("/api/db/usuarios/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { role, cargo, nombre, cedula } = req.body || {};
+      const updates: any = { updated_at: new Date().toISOString() };
+      if (role !== undefined) updates.role = role;
+      if (cargo !== undefined) updates.cargo = cargo;
+      if (nombre !== undefined) updates.nombre = nombre;
+      if (cedula !== undefined) updates.cedula = cedula;
+
+      const { data, error } = await supabaseAdmin
+        .from("usuarios")
+        .update(updates)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (err: any) {
+      console.error("Error en PATCH /api/db/usuarios/:id:", err);
+      res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  app.delete("/api/db/usuarios/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { error } = await supabaseAdmin.from("usuarios").delete().eq("id", id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error en DELETE /api/db/usuarios/:id:", err);
       res.status(500).json({ success: false, error: err?.message });
     }
   });
@@ -108,8 +418,48 @@ async function startServer() {
 
   app.post("/api/db/usuarios", async (req, res) => {
     try {
-      const { data, error } = await supabaseAdmin.from("usuarios").upsert(req.body, { onConflict: "id" }).select().single();
+      const { id, nombre, cedula, cargo, role, local_id, activo, password } = req.body || {};
+      
+      const payload: any = {};
+      if (id) payload.id = id;
+      if (nombre !== undefined) payload.nombre = nombre;
+      if (cedula !== undefined) payload.cedula = cedula;
+      if (cargo !== undefined) payload.cargo = cargo;
+      if (role !== undefined) payload.role = role;
+      if (local_id !== undefined) payload.local_id = local_id;
+
+      const { data, error } = await supabaseAdmin
+        .from("usuarios")
+        .upsert(payload, { onConflict: "id" })
+        .select()
+        .single();
+        
       if (error) throw error;
+
+      // Si se especificó contraseña o estado activo, sincronizar en la configuración de seguridad en Supabase
+      if (nombre && (activo !== undefined || password !== undefined)) {
+        const userKey = (cedula || nombre).trim().toLowerCase();
+        const secConfig = await getSecurityConfigFromSupabase();
+        let changed = false;
+
+        if (password) {
+          secConfig.passwords[userKey] = password;
+          secConfig.passwords[nombre.toLowerCase()] = password;
+          changed = true;
+        }
+
+        if (activo !== undefined) {
+          const status = activo ? "active" : "suspended";
+          secConfig.statuses[userKey] = status;
+          secConfig.statuses[nombre.toLowerCase()] = status;
+          changed = true;
+        }
+
+        if (changed) {
+          await saveSecurityConfigToSupabase(secConfig);
+        }
+      }
+
       res.json({ success: true, data });
     } catch (err: any) {
       console.error("Error en POST /api/db/usuarios:", err);

@@ -342,8 +342,6 @@ export const dbAdapter = {
       cedula: member.cedula || null,
       cargo: targetCargo,
       role: targetRole,
-      apto_propinas: typeof member.aptoPropinas === "boolean" ? member.aptoPropinas : true,
-      activo: typeof member.activo === "boolean" ? member.activo : true,
       local_id: localId
     };
 
@@ -351,18 +349,14 @@ export const dbAdapter = {
       payload.id = member.id;
     }
 
-    try {
-      const { data, error } = await supabase
-        .from("usuarios")
-        .upsert(payload, { onConflict: "id" })
-        .select()
-        .single();
-
-      if (!error && data) return data;
-    } catch (e) {
-      console.warn("Guardar usuario directo falló por RLS, guardando vía servidor...", e);
+    if (member.activo !== undefined) {
+      payload.activo = member.activo;
+    }
+    if (member.password) {
+      payload.password = member.password;
     }
 
+    // Guardar vía backend para garantizar sincronización de seguridad y roles sin colisiones de RLS
     const res = await fetch("/api/db/usuarios", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -377,24 +371,12 @@ export const dbAdapter = {
   },
 
   async deleteTeamMember(usuarioId: string) {
-    try {
-      const { error } = await supabase
-        .from("usuarios")
-        .update({ activo: false })
-        .eq("id", usuarioId);
-      if (!error) return;
-    } catch (e) {
-      console.warn("Desactivar usuario directo falló, usando servidor...", e);
-    }
-
-    const res = await fetch("/api/db/usuarios", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: usuarioId, activo: false })
+    const res = await fetch(`/api/db/usuarios/${usuarioId}`, {
+      method: "DELETE"
     });
     if (!res.ok) {
       const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error || "Error al desactivar usuario en el servidor");
+      throw new Error(errJson.error || "Error al eliminar usuario en el servidor");
     }
   },
 

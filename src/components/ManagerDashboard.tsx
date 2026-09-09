@@ -78,6 +78,7 @@ import SalariesManager, {
   formatNumberWithDots,
   parseNumberFromDots
 } from "./SalariesManager";
+import SecurityAndRoles from "./SecurityAndRoles";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -128,7 +129,7 @@ interface ManagerDashboardProps {
 
 export default function ManagerDashboard({ onLogout, username, local = "Chapinero" }: ManagerDashboardProps) {
   const [cierres, setCierres] = useState<CierreCaja[]>([]);
-  const [activeTab, setActiveTab] = useState<"metrics" | "indicadores" | "audit" | "inventory" | "checklist" | "history" | "propinas" | "team" | "salarios">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "indicadores" | "audit" | "inventory" | "checklist" | "history" | "propinas" | "team" | "salarios" | "security">("metrics");
   const [auditSubTab, setAuditSubTab] = useState<"pending" | "history">("pending");
   const [selectedCierreId, setSelectedCierreId] = useState<string | null>(null);
   const [posData, setPosData] = useState<{
@@ -308,11 +309,16 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     handleUpdateSalaryConfig(employeeName, "horarioSemanal", currentSchedule);
   };
   
-  // Formulario para registrar nuevo miembro
+  // Formulario para registrar nuevo miembro (Ficha Laboral)
   const [newMemberName, setNewMemberName] = useState("");
   const [newMemberCedula, setNewMemberCedula] = useState("");
   const [newMemberPassword, setNewMemberPassword] = useState("tienda");
   const [newMemberRole, setNewMemberRole] = useState<UserRole>("Asistente de Servicio");
+  const [newMemberArea, setNewMemberArea] = useState<"Ventas" | "Pastelería">("Ventas");
+  const [newMemberTipoContrato, setNewMemberTipoContrato] = useState<string>("Indefinido");
+  const [newMemberSalario, setNewMemberSalario] = useState<number>(1750905);
+  const [newMemberAuxTransp, setNewMemberAuxTransp] = useState<boolean>(true);
+  const [newMemberDiaDescanso, setNewMemberDiaDescanso] = useState<string>("Domingo");
   const [newMemberPoints, setNewMemberPoints] = useState<string>("1.3");
   const [newMemberIsEligible, setNewMemberIsEligible] = useState(true);
 
@@ -1766,7 +1772,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
               </div>
             </button>
 
-            {/* Gestión Equipo */}
+            {/* Perfiles de Empleados */}
             <button
               onClick={() => { setActiveTab("team"); setSelectedCierreId(null); }}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
@@ -1777,7 +1783,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
             >
               <div className="flex items-center space-x-3">
                 <Users className={`w-4 h-4 ${activeTab === "team" ? "text-white" : "text-[#1C2E24]/60"}`} />
-                <span>Gestión Equipo</span>
+                <span>Perfiles de Empleados</span>
               </div>
               <span className="text-[10px] font-bold text-[#1C2E24]/40 font-mono">
                 {teamMembers.length}
@@ -1818,11 +1824,20 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
             </button>
 
             <button
-              onClick={() => alert("Seguridad y Control de Acceso: Base de datos local cifrada.")}
-              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-bold text-[#1C2E24]/70 hover:bg-slate-50 hover:text-[#1C2E24] transition-all cursor-pointer"
+              onClick={() => { setActiveTab("security"); setSelectedCierreId(null); }}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "security"
+                  ? "bg-[#1E3E30] text-white shadow-xs"
+                  : "text-[#1C2E24]/70 hover:bg-slate-50 hover:text-[#1C2E24]"
+              }`}
             >
-              <Shield className="w-4 h-4 text-[#1C2E24]/60" />
-              <span>Seguridad & Roles</span>
+              <div className="flex items-center space-x-3">
+                <Shield className={`w-4 h-4 ${activeTab === "security" ? "text-white" : "text-[#1C2E24]/60"}`} />
+                <span>Seguridad & Roles</span>
+              </div>
+              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                Activo
+              </span>
             </button>
           </div>
         </div>
@@ -4159,16 +4174,75 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
         {activeTab === "team" && (
           <div className="space-y-6">
-            {/* Cabecera de Gestión de Equipo */}
+            {/* Cabecera de Perfiles de Empleados & Talento Humano */}
             <div className="bg-white p-6 border-2 border-brand-ink shadow-[4px_4px_0px_0px_#1C1917] flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <h2 className="text-xl font-black text-brand-ink flex items-center space-x-2">
                   <Users className="w-6 h-6 text-brand-ink" />
-                  <span>Gestión del Equipo y Roster</span>
+                  <span>Perfiles de Empleados & Talento Humano</span>
                 </h2>
                 <p className="text-xs text-brand-ink/70 mt-1 font-medium">
-                  Registra personal, define pesos de reparto para propinas, gestiona trainees y de baja colaboradores. Los cambios se sincronizan con la pantalla de inicio de sesión.
+                  Fichas laborales, asignación salarial base, auxilios de transporte, bonificaciones y jornada semanal Ley 2101 (42 hrs). Las credenciales y claves se administran en Seguridad & Roles.
                 </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("salarios")}
+                  className="px-3 py-2 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-300 text-xs font-black uppercase rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                >
+                  <DollarSign className="w-4 h-4 text-purple-700" />
+                  <span>Ir a Nómina & Salarios</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("security")}
+                  className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-black uppercase rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                >
+                  <Shield className="w-4 h-4 text-emerald-700" />
+                  <span>Seguridad & Roles</span>
+                </button>
+              </div>
+            </div>
+
+            {/* KPI Cards de Talento Humano */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className="bg-white border-2 border-brand-ink p-4 shadow-[3px_3px_0px_0px_#1C1917]">
+                <span className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Total Personal</span>
+                <div className="flex items-baseline space-x-1.5 mt-1">
+                  <span className="text-2xl font-black text-brand-ink font-mono">{teamMembers.length}</span>
+                  <span className="text-[11px] font-bold text-emerald-600">({teamMembers.filter(m => m.activo !== false).length} activos)</span>
+                </div>
+              </div>
+
+              <div className="bg-white border-2 border-brand-ink p-4 shadow-[3px_3px_0px_0px_#1C1917]">
+                <span className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Distribución Áreas</span>
+                <div className="flex items-center space-x-2 mt-1.5 text-xs font-bold font-mono">
+                  <span className="px-2 py-0.5 bg-blue-50 text-blue-800 border border-blue-200 rounded">
+                    Ventas: {teamMembers.filter(m => !m.role?.toLowerCase().includes("pasteler") && !m.role?.toLowerCase().includes("cocina")).length}
+                  </span>
+                  <span className="px-2 py-0.5 bg-amber-50 text-amber-900 border border-amber-200 rounded">
+                    Pastelería: {teamMembers.filter(m => m.role?.toLowerCase().includes("pasteler") || m.role?.toLowerCase().includes("cocina")).length}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-white border-2 border-brand-ink p-4 shadow-[3px_3px_0px_0px_#1C1917]">
+                <span className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Jornada Ley 2101</span>
+                <div className="flex items-baseline space-x-1 mt-1">
+                  <span className="text-xl font-black text-brand-ink font-mono">42.0h</span>
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase">máx/semana</span>
+                </div>
+              </div>
+
+              <div className="bg-white border-2 border-brand-ink p-4 shadow-[3px_3px_0px_0px_#1C1917]">
+                <span className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Aptos Propinas</span>
+                <div className="flex items-baseline space-x-1.5 mt-1">
+                  <span className="text-2xl font-black text-amber-700 font-mono">
+                    {teamMembers.filter(m => m.aptoPropinas && m.role !== "gerente").length}
+                  </span>
+                  <span className="text-[11px] font-bold text-zinc-500">colaboradores</span>
+                </div>
               </div>
             </div>
 
@@ -4194,23 +4268,29 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                     <thead>
                       <tr className="bg-[#F5F2EB] border-b-2 border-brand-ink">
                         <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink">Colaborador</th>
-                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink">Rol / Credenciales</th>
-                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink text-center">Puntos Propinas</th>
-                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink text-center">Apto Propinas</th>
+                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink">Cargo & Área</th>
+                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink">Salario Base</th>
+                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink text-center">Jornada Ley 2101</th>
+                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink text-center">Propinas</th>
                         <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink text-center">Estado</th>
-                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink text-center w-12">Acción</th>
+                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink text-center w-28">Acciones</th>
                       </tr>
                     </thead>
                     <tbody>
                       {teamMembers.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="py-8 text-center text-xs font-bold text-zinc-400 italic">
-                            No hay colaboradores registrados.
+                          <td colSpan={7} className="py-8 text-center text-xs font-bold text-zinc-400 italic">
+                            No hay colaboradores registrados en el sistema.
                           </td>
                         </tr>
                       ) : (
                         teamMembers.map((member, idx) => {
                           const isGerente = member.role === "gerente";
+                          const config = getEmployeeSalaryConfig(member);
+                          const totalWeeklyHours = calculateTotalWeeklyHours(config.horarioSemanal || []);
+                          const isPasteleria = member.role?.toLowerCase().includes("pasteler") || member.role?.toLowerCase().includes("cocina");
+                          const areaName = config.area || (isPasteleria ? "Pastelería" : "Ventas");
+
                           return (
                             <React.Fragment key={idx}>
                               <tr className="border-b border-brand-ink/10 hover:bg-zinc-50/50">
@@ -4234,64 +4314,85 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                 </div>
                               </td>
                               <td className="py-3 px-3">
-                                <select
-                                  value={member.role}
-                                  onChange={(e) => {
-                                    const newRole = e.target.value;
-                                    const newPoints = getRolePoints(newRole);
-                                    const updated = [...teamMembers];
-                                    updated[idx].role = newRole;
-                                    updated[idx].puntosPropinas = newPoints;
-                                    saveTeamMembers(updated);
+                                <div className="space-y-1">
+                                  <select
+                                    value={member.role}
+                                    onChange={(e) => {
+                                      const newRole = e.target.value;
+                                      const newPoints = getRolePoints(newRole);
+                                      const updated = [...teamMembers];
+                                      updated[idx].role = newRole;
+                                      updated[idx].puntosPropinas = newPoints;
+                                      saveTeamMembers(updated);
 
-                                    if (salariesConfig[member.nombre]) {
-                                      handleUpdateSalaryConfig(member.nombre, "role", newRole);
-                                      handleUpdateSalaryConfig(member.nombre, "puntajePropinas", newPoints);
-                                    }
-                                  }}
-                                  className="text-[11px] font-bold border border-zinc-300 rounded px-2 py-1 bg-white outline-none cursor-pointer text-brand-ink hover:border-brand-ink"
-                                >
-                                  <option value="Líder operador">Líder operador (2.0 pts)</option>
-                                  <option value="Asistente de Servicio">Asistente de Servicio (1.3 pts)</option>
-                                  <option value="Líder de pastelería">Líder de pastelería (1.5 pts)</option>
-                                  <option value="Auxiliar de pastelería">Auxiliar de pastelería (0.8 pts)</option>
-                                  <option value="gerente">Gerente (0.0 pts)</option>
-                                </select>
-                                <span className="block text-[9px] text-zinc-500 mt-0.5 font-medium">
-                                  Clave: <code className="bg-zinc-100 px-1 font-mono">{member.password}</code>
+                                      if (salariesConfig[member.nombre]) {
+                                        handleUpdateSalaryConfig(member.nombre, "role", newRole);
+                                        handleUpdateSalaryConfig(member.nombre, "puntajePropinas", newPoints);
+                                      }
+                                    }}
+                                    className="text-[11px] font-bold border border-zinc-300 rounded px-2 py-1 bg-white outline-none cursor-pointer text-brand-ink hover:border-brand-ink block w-full max-w-[160px]"
+                                  >
+                                    <option value="Líder operador">Líder operador (2.0 pts)</option>
+                                    <option value="Asistente de Servicio">Asistente de Servicio (1.3 pts)</option>
+                                    <option value="Líder de pastelería">Líder de pastelería (1.5 pts)</option>
+                                    <option value="Auxiliar de pastelería">Auxiliar de pastelería (0.8 pts)</option>
+                                    <option value="gerente">Gerente (0.0 pts)</option>
+                                  </select>
+                                  <span className={`inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded border ${
+                                    areaName === "Pastelería"
+                                      ? "bg-amber-50 text-amber-900 border-amber-200"
+                                      : "bg-blue-50 text-blue-900 border-blue-200"
+                                  }`}>
+                                    {areaName}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className="text-xs font-black font-mono text-brand-ink block">
+                                  ${formatNumberWithDots(config.salarioBaseMensual || smmlvBase)}
                                 </span>
+                                <span className={`text-[9px] font-bold uppercase tracking-wider ${
+                                  config.auxilioTransporteAplica !== false ? "text-emerald-700" : "text-zinc-400"
+                                }`}>
+                                  {config.auxilioTransporteAplica !== false ? "+ Aux. Transporte" : "Sin auxilio"}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 text-center">
+                                <div className="flex flex-col items-center justify-center">
+                                  <span className="text-xs font-black font-mono px-2 py-0.5 bg-zinc-100 text-zinc-900 rounded border border-zinc-300">
+                                    {totalWeeklyHours.toFixed(1)}h / 42h
+                                  </span>
+                                  <span className={`text-[8px] font-black uppercase tracking-wider mt-0.5 px-1.5 py-0.2 rounded ${
+                                    totalWeeklyHours <= 42 ? "text-emerald-700 bg-emerald-50" : "text-red-700 bg-red-50"
+                                  }`}>
+                                    {totalWeeklyHours <= 42 ? "En regla (42h)" : "Exceso >42h"}
+                                  </span>
+                                </div>
                               </td>
                               <td className="py-3 px-3 text-center">
                                 {isGerente ? (
                                   <span className="text-xs font-bold font-mono text-zinc-400">0.0 pts</span>
                                 ) : (
-                                  <div className="flex flex-col items-center justify-center">
+                                  <div className="flex flex-col items-center justify-center space-y-1">
                                     <span className="text-xs font-black font-mono px-2 py-0.5 bg-amber-50 border border-amber-300 text-amber-950 rounded">
                                       {getRolePoints(member.role)} pts
                                     </span>
-                                    <span className="text-[8px] text-zinc-400 font-bold uppercase tracking-wider mt-0.5">Automático</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = [...teamMembers];
+                                        updated[idx].aptoPropinas = !updated[idx].aptoPropinas;
+                                        saveTeamMembers(updated);
+                                      }}
+                                      className={`px-2 py-0.5 text-[9px] font-black uppercase tracking-wider border rounded cursor-pointer ${
+                                        member.aptoPropinas 
+                                          ? "bg-emerald-50 text-emerald-800 border-emerald-300" 
+                                          : "bg-amber-50 text-amber-900 border-amber-300"
+                                      }`}
+                                    >
+                                      {member.aptoPropinas ? "Apto (Sí)" : "Trainee (No)"}
+                                    </button>
                                   </div>
-                                )}
-                              </td>
-                              <td className="py-3 px-3 text-center">
-                                {isGerente ? (
-                                  <span className="text-xs font-bold font-mono text-zinc-400">Inapto</span>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const updated = [...teamMembers];
-                                      updated[idx].aptoPropinas = !updated[idx].aptoPropinas;
-                                      saveTeamMembers(updated);
-                                    }}
-                                    className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-wider border cursor-pointer ${
-                                      member.aptoPropinas 
-                                        ? "bg-emerald-50 text-emerald-800 border-emerald-300" 
-                                        : "bg-amber-50 text-amber-900 border-amber-300"
-                                    }`}
-                                  >
-                                    {member.aptoPropinas ? "Apto (Sí)" : "Entrenamiento (No)"}
-                                  </button>
                                 )}
                               </td>
                               <td className="py-3 px-3 text-center">
@@ -4302,7 +4403,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                     updated[idx].activo = !updated[idx].activo;
                                     saveTeamMembers(updated);
                                   }}
-                                  className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded-full border cursor-pointer ${
+                                  className={`px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider rounded-full border cursor-pointer ${
                                     member.activo
                                       ? "bg-green-100 text-green-800 border-green-300"
                                       : "bg-zinc-100 text-zinc-500 border-zinc-300"
@@ -4312,7 +4413,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                 </button>
                               </td>
                               <td className="py-3 px-3 text-center">
-                                <div className="flex items-center justify-center space-x-1">
+                                <div className="flex items-center justify-center space-x-1.5">
                                   <button
                                     type="button"
                                     onClick={() => setExpandedMemberName(expandedMemberName === member.nombre ? null : member.nombre)}
@@ -4324,8 +4425,17 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                     title="Editar Ficha Técnica, Salario Base, Bonos y Horario Semanal"
                                   >
                                     <Sliders className="w-3 h-3" />
-                                    <span className="hidden md:inline">Ficha y Horarios</span>
+                                    <span className="hidden sm:inline">Ficha</span>
                                     {expandedMemberName === member.nombre ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveTab("salarios")}
+                                    className="p-1 text-purple-700 hover:bg-purple-100 rounded border border-purple-200 transition-colors"
+                                    title="Ver y liquidar en Nómina & Salarios"
+                                  >
+                                    <DollarSign className="w-3.5 h-3.5" />
                                   </button>
 
                                   {member.nombre.toLowerCase() !== username.toLowerCase() && (
@@ -4364,7 +4474,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
                             {expandedMemberName === member.nombre && (
                               <tr key={`expanded-${idx}`} className="bg-amber-50/20 border-b-2 border-brand-ink">
-                                <td colSpan={6} className="p-3 sm:p-5 space-y-4">
+                                <td colSpan={7} className="p-3 sm:p-5 space-y-4">
                                   {(() => {
                                     const config = getEmployeeSalaryConfig(member);
                                     const weeklyHours = calculateTotalWeeklyHours(config.horarioSemanal);
@@ -4748,13 +4858,16 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                 </div>
               </div>
 
-              {/* Columna Derecha: Registrar Nuevo Miembro */}
+              {/* Columna Derecha: Registrar Nuevo Empleado (Ficha Laboral) */}
               <div className="bg-white border-2 border-brand-ink p-6 shadow-[4px_4px_0px_0px_#1C1917] space-y-4">
                 <div className="border-b border-brand-ink/10 pb-3">
                   <h3 className="text-sm font-black uppercase tracking-wider text-brand-ink flex items-center space-x-2">
                     <UserPlus className="w-4 h-4 text-brand-ink" />
-                    <span>Registrar Colaborador</span>
+                    <span>Registrar Empleado (Ficha Laboral)</span>
                   </h3>
+                  <p className="text-[10px] text-zinc-500 mt-1 font-medium">
+                    Crea el perfil contractual y conecta automáticamente con el módulo de nómina. (Las credenciales de acceso al sistema se gestionan en Seguridad & Roles).
+                  </p>
                 </div>
 
                 <form 
@@ -4762,7 +4875,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                     e.preventDefault();
                     const nameClean = newMemberName.trim();
                     if (!nameClean) {
-                      alert("Por favor escribe el nombre.");
+                      alert("Por favor escribe el nombre del empleado.");
                       return;
                     }
                     if (teamMembers.some(m => m.nombre.toLowerCase() === nameClean.toLowerCase())) {
@@ -4771,7 +4884,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                     }
 
                     const calculatedPoints = getRolePoints(newMemberRole);
-                    const isPasteleria = newMemberRole.toLowerCase().includes("pasteler") || newMemberRole.toLowerCase().includes("cocina");
+                    const isPasteleria = newMemberArea === "Pastelería" || newMemberRole.toLowerCase().includes("pasteler") || newMemberRole.toLowerCase().includes("cocina");
 
                     try {
                       const saved = await dbAdapter.saveTeamMember({
@@ -4790,40 +4903,44 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           nombre: nameClean,
                           cedula: newMemberCedula.trim(),
                           role: newMemberRole,
-                          area: isPasteleria ? "Pastelería" : "Ventas",
-                          salarioBaseMensual: smmlvBase,
-                          tipoContrato: "Indefinido",
-                          auxilioTransporteAplica: true,
+                          area: newMemberArea,
+                          salarioBaseMensual: newMemberSalario || smmlvBase,
+                          tipoContrato: newMemberTipoContrato,
+                          auxilioTransporteAplica: newMemberAuxTransp,
                           informacionParticular: "",
                           bonoFijoQuincenal: 0,
                           descuentoFijoQuincenal: 0,
                           puntajePropinas: calculatedPoints,
                           bonosConfigurados: [],
-                          diaDescansoContractual: "Domingo",
+                          diaDescansoContractual: newMemberDiaDescanso,
                           horarioSemanal: [
-                            { dia: "Lunes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
-                            { dia: "Martes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
-                            { dia: "Miércoles", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
-                            { dia: "Jueves", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
-                            { dia: "Viernes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
-                            { dia: "Sábado", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
-                            { dia: "Domingo", horaEntrada: "00:00", horaSalida: "00:00", activo: false, horasCalculadas: 0 }
+                            { dia: "Lunes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Lunes", horasCalculadas: newMemberDiaDescanso === "Lunes" ? 0 : 7 },
+                            { dia: "Martes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Martes", horasCalculadas: newMemberDiaDescanso === "Martes" ? 0 : 7 },
+                            { dia: "Miércoles", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Miércoles", horasCalculadas: newMemberDiaDescanso === "Miércoles" ? 0 : 7 },
+                            { dia: "Jueves", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Jueves", horasCalculadas: newMemberDiaDescanso === "Jueves" ? 0 : 7 },
+                            { dia: "Viernes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Viernes", horasCalculadas: newMemberDiaDescanso === "Viernes" ? 0 : 7 },
+                            { dia: "Sábado", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Sábado", horasCalculadas: newMemberDiaDescanso === "Sábado" ? 0 : 7 },
+                            { dia: "Domingo", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Domingo", horasCalculadas: newMemberDiaDescanso === "Domingo" ? 0 : 7 }
                           ]
                         });
                       }
 
                       await loadTeamMembers();
-                      alert(`¡Colaborador "${nameClean}" registrado con éxito en Supabase y conectado al módulo de Salarios!`);
+                      alert(`¡Empleado "${nameClean}" registrado con éxito en la Ficha Laboral y conectado a Nómina!`);
                     } catch (err: any) {
-                      console.error("Error al registrar colaborador en Supabase:", err);
+                      console.error("Error al registrar colaborador:", err);
                       alert("Error al registrar colaborador: " + (err?.message || ""));
                     }
                     
                     // Resetear formulario
                     setNewMemberName("");
                     setNewMemberCedula("");
-                    setNewMemberPassword("tienda");
                     setNewMemberRole("Asistente de Servicio");
+                    setNewMemberArea("Ventas");
+                    setNewMemberTipoContrato("Indefinido");
+                    setNewMemberSalario(smmlvBase);
+                    setNewMemberAuxTransp(true);
+                    setNewMemberDiaDescanso("Domingo");
                     setNewMemberPoints(getRolePoints("Asistente de Servicio").toString());
                     setNewMemberIsEligible(true);
                   }}
@@ -4846,7 +4963,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
                     <div className="space-y-1">
                       <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
-                        Número de Cédula (C.C.)
+                        Cédula de Ciudadanía
                       </label>
                       <input
                         type="text"
@@ -4862,20 +4979,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
-                        Contraseña Login
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={newMemberPassword}
-                        onChange={(e) => setNewMemberPassword(e.target.value)}
-                        className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-mono font-bold text-brand-ink outline-none"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
-                        Rol de Turno
+                        Cargo Operativo
                       </label>
                       <select
                         value={newMemberRole}
@@ -4884,6 +4988,11 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           setNewMemberRole(role);
                           const pts = getRolePoints(role);
                           setNewMemberPoints(pts.toString());
+                          if (role.toLowerCase().includes("pasteler")) {
+                            setNewMemberArea("Pastelería");
+                          } else if (role !== "gerente") {
+                            setNewMemberArea("Ventas");
+                          }
                         }}
                         className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-bold text-brand-ink outline-none cursor-pointer"
                       >
@@ -4891,62 +5000,114 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                         <option value="Asistente de Servicio">Asistente de Servicio (1.3 pts)</option>
                         <option value="Líder de pastelería">Líder de pastelería (1.5 pts)</option>
                         <option value="Auxiliar de pastelería">Auxiliar de pastelería (0.8 pts)</option>
+                        <option value="gerente">Gerente (0.0 pts)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
+                        Área de Trabajo
+                      </label>
+                      <select
+                        value={newMemberArea}
+                        onChange={(e: any) => setNewMemberArea(e.target.value)}
+                        className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-bold text-brand-ink outline-none cursor-pointer"
+                      >
+                        <option value="Ventas">Ventas (Servicio/Barra)</option>
+                        <option value="Pastelería">Pastelería / Producción</option>
                       </select>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 items-center pt-1">
+                  <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
-                        Puntos Propinas (Fijo)
+                        Tipo de Contrato
                       </label>
-                      <div className="w-full bg-amber-50 border-2 border-brand-ink px-3 py-2 text-xs font-mono font-black text-brand-ink flex items-center justify-between">
-                        <span>{getRolePoints(newMemberRole)} pts</span>
-                        <span className="text-[8px] font-bold uppercase tracking-wide text-zinc-500">Automático</span>
-                      </div>
+                      <select
+                        value={newMemberTipoContrato}
+                        onChange={(e) => setNewMemberTipoContrato(e.target.value)}
+                        className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-bold text-brand-ink outline-none cursor-pointer"
+                      >
+                        <option value="Indefinido">Término Indefinido</option>
+                        <option value="Fijo">Término Fijo</option>
+                        <option value="Por Días">Por Días / Prestación</option>
+                        <option value="Aprendizaje">Contrato de Aprendizaje</option>
+                      </select>
                     </div>
 
-                    <div className="flex items-center space-x-2 h-full pt-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
+                        Día Descanso Semanal
+                      </label>
+                      <select
+                        value={newMemberDiaDescanso}
+                        onChange={(e) => setNewMemberDiaDescanso(e.target.value)}
+                        className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-bold text-brand-ink outline-none cursor-pointer"
+                      >
+                        <option value="Domingo">Domingo</option>
+                        <option value="Lunes">Lunes</option>
+                        <option value="Martes">Martes</option>
+                        <option value="Miércoles">Miércoles</option>
+                        <option value="Jueves">Jueves</option>
+                        <option value="Viernes">Viernes</option>
+                        <option value="Sábado">Sábado</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
+                        Salario Base Mensual
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setNewMemberSalario(smmlvBase)}
+                        className="text-[9px] font-bold text-brand-ink/70 hover:text-brand-ink underline cursor-pointer"
+                      >
+                        Usar SMMLV ($1.750.905)
+                      </button>
+                    </div>
+                    <MoneyInput
+                      value={newMemberSalario}
+                      onChange={(v) => setNewMemberSalario(v)}
+                      placeholder="1.750.905"
+                      className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-mono font-black text-brand-ink outline-none"
+                    />
+                  </div>
+
+                  <div className="space-y-2 pt-1">
+                    <label className="flex items-center space-x-2 cursor-pointer select-none">
                       <input
                         type="checkbox"
-                        id="new-member-eligible"
+                        checked={newMemberAuxTransp}
+                        onChange={(e) => setNewMemberAuxTransp(e.target.checked)}
+                        className="w-4 h-4 border-2 border-brand-ink rounded focus:ring-0 accent-brand-ink"
+                      />
+                      <span className="text-[11px] font-bold text-brand-ink">
+                        Aplica Auxilio Legal de Transporte (+$249.095/mes)
+                      </span>
+                    </label>
+
+                    <label className="flex items-center space-x-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
                         checked={newMemberIsEligible}
                         onChange={(e) => setNewMemberIsEligible(e.target.checked)}
                         className="w-4 h-4 border-2 border-brand-ink rounded focus:ring-0 accent-brand-ink"
                       />
-                      <label 
-                        htmlFor="new-member-eligible" 
-                        className="text-[10px] font-black uppercase tracking-wider text-brand-ink select-none cursor-pointer"
-                      >
-                        Apto Propinas
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="bg-zinc-50 p-3 border border-brand-ink/10 rounded space-y-1.5">
-                    <span className="text-[9px] font-black uppercase text-brand-ink/60 block tracking-wide">
-                      Política de Distribución por Puntos:
-                    </span>
-                    <p className="text-[10px] font-medium leading-relaxed text-zinc-600">
-                      • <strong>Líder Operador</strong>: 2.0 puntos.
-                      <br />
-                      • <strong>Asistente TC</strong>: 1.3 puntos.
-                      <br />
-                      • <strong>Asistente MT</strong>: 1.0 puntos.
-                      <br />
-                      • <strong>Líder de Pastelería</strong>: 1.5 puntos.
-                      <br />
-                      • <strong>Auxiliar de Pastelería</strong>: 0.8 puntos.
-                      <br />
-                      • <strong>Trainee/Entrenamiento</strong>: desmarque "Apto Propinas" para excluir temporalmente.
-                    </p>
+                      <span className="text-[11px] font-bold text-brand-ink">
+                        Apto para Distribución de Propinas ({getRolePoints(newMemberRole)} pts)
+                      </span>
+                    </label>
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full bg-brand-ink hover:bg-black text-white text-xs font-black uppercase tracking-wider py-3 border-2 border-brand-ink shadow-[3px_3px_0px_0px_#D4D4D8] transition-all cursor-pointer"
+                    className="w-full bg-brand-ink hover:bg-black text-white text-xs font-black uppercase tracking-wider py-3 border-2 border-brand-ink shadow-[3px_3px_0px_0px_#D4D4D8] transition-all cursor-pointer mt-2"
                   >
-                    Registrar y Habilitar Login
+                    Guardar Ficha Laboral del Empleado
                   </button>
                 </form>
               </div>
@@ -4983,6 +5144,68 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
         {activeTab === "salarios" && (
           <SalariesManager teamMembers={teamMembers} />
+        )}
+
+        {activeTab === "security" && (
+          <SecurityAndRoles
+            teamMembers={teamMembers}
+            currentUsername={username}
+            localName={local}
+            onUpdateMember={async (memberId, updates) => {
+              const member = teamMembers.find(m => m.id === memberId);
+              if (member) {
+                const merged = { ...member, ...updates };
+                await dbAdapter.saveTeamMember(merged, local);
+                await loadTeamMembers();
+              }
+            }}
+            onDeleteMember={async (memberName) => {
+              await handleDeleteTeamMember(memberName);
+            }}
+            onAddMember={async (memberData) => {
+              const calculatedPoints = getRolePoints(memberData.role);
+              const isPasteleria = memberData.role.toLowerCase().includes("pasteler") || memberData.role.toLowerCase().includes("cocina");
+              const saved = await dbAdapter.saveTeamMember({
+                nombre: memberData.nombre,
+                cedula: memberData.cedula,
+                role: memberData.role as any,
+                cargo: memberData.role as any,
+                local: local,
+                puntosPropinas: calculatedPoints,
+                aptoPropinas: true,
+                activo: memberData.activo
+              }, local);
+
+              if (saved?.id) {
+                await dbAdapter.saveNominaConfig(saved.id, {
+                  nombre: memberData.nombre,
+                  cedula: memberData.cedula,
+                  role: memberData.role,
+                  area: isPasteleria ? "Pastelería" : "Ventas",
+                  salarioBaseMensual: smmlvBase,
+                  tipoContrato: "Indefinido",
+                  auxilioTransporteAplica: true,
+                  informacionParticular: "",
+                  bonoFijoQuincenal: 0,
+                  descuentoFijoQuincenal: 0,
+                  puntajePropinas: calculatedPoints,
+                  bonosConfigurados: [],
+                  diaDescansoContractual: "Domingo",
+                  horarioSemanal: [
+                    { dia: "Lunes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
+                    { dia: "Martes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
+                    { dia: "Miércoles", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
+                    { dia: "Jueves", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
+                    { dia: "Viernes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
+                    { dia: "Sábado", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: true, horasCalculadas: 7 },
+                    { dia: "Domingo", horaEntrada: "00:00", horaSalida: "00:00", activo: false, horasCalculadas: 0 }
+                  ]
+                });
+              }
+              await loadTeamMembers();
+            }}
+            onReload={loadTeamMembers}
+          />
         )}
 
       </main>

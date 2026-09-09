@@ -1,6 +1,6 @@
 {
   "name": "prueba 2",
-  "description": "Sistema de conciliación de caja y auditoría de reportes POS para López \u0026 Gracia con integración Firebase.",
+  "description": "Sistema de gestión operativa, roles, seguridad, conciliación y auditoría para López & Gracia con persistencia en Supabase Cloud.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
