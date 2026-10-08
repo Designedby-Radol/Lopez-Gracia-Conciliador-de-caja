@@ -15,6 +15,7 @@ import {
   Sparkles,
   AlertCircle
 } from "lucide-react";
+import { todayBogota } from "../lib/dates";
 
 export interface InsumoMaster {
   id: string;
@@ -83,7 +84,7 @@ export default function InventoryClosure({
   const [activeTab, setActiveTab] = useState<"new" | "history" | "catalog">("new");
 
   // Form state for active count
-  const [fecha, setFecha] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [fecha, setFecha] = useState<string>(() => todayBogota());
   const [itemsState, setItemsState] = useState<InsumoCountItem[]>([]);
   const [observaciones, setObservaciones] = useState<string>("");
   const [filterCategory, setFilterCategory] = useState<string>("todos");

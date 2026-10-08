@@ -38,6 +38,7 @@ import { CierreCaja } from "../types";
 import Logo from "./Logo";
 import InventoryClosure from "./InventoryClosure";
 import OperationalChecklist from "./OperationalChecklist";
+import { todayBogota } from "../lib/dates";
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -51,14 +52,7 @@ interface CollaboratorInflowProps {
 
 export default function CollaboratorInflow({ onLogout, username, role = "colaborador", local = "Chapinero" }: CollaboratorInflowProps) {
   // Configurar la fecha predeterminada como el día actual en formato YYYY-MM-DD (hora de Bogotá)
-  const getTodayString = () => {
-    const d = new Date();
-    // Ajuste de zona horaria de Bogotá (UTC-5) si es necesario
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
+  const getTodayString = () => todayBogota();
 
   const [fecha, setFecha] = useState(getTodayString());
   const [colaboradorNombre, setColaboradorNombre] = useState(username || "");
@@ -568,13 +562,8 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
         // Guardar nuevo cierre
         const result = await dbAdapter.saveCierre({
           ...payload,
+          // Los valores POS los registra Gerencia al auditar.
           estado: "Pendiente por Cuadrar" as const,
-          efectivoPOS: 0,
-          tarjetasPOS: 0,
-          justoPOS: 0,
-          rappiPOS: 0,
-          transferenciasPOS: 0,
-          posFileName: "",
         }, local);
         setSuccessData(result);
       }
@@ -591,7 +580,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
       setNovedades("");
     } catch (error) {
       console.error("Error al guardar/actualizar cierre de caja:", error);
-      alert("Hubo un error al procesar el cierre. Intente nuevamente.");
+      alert(`No se pudo guardar el cierre: ${(error as Error)?.message || "intente nuevamente."}`);
     } finally {
       setIsSubmitting(false);
     }

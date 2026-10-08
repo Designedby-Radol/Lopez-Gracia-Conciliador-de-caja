@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { CierreCaja } from "../types";
 import { jsPDF } from "jspdf";
+import { todayBogota } from "../lib/dates";
 
 interface IndicadoresDashboardProps {
   cierres: CierreCaja[];
@@ -501,7 +502,7 @@ export default function IndicadoresDashboard({
     doc.text(`• Minutos Acumulados de Tardanza: ${llegadasMetrics.totalMinutosTardanza} minutos en el periodo evaluado`, 14, y);
     y += 10;
 
-    doc.save(`INFORME_INDICADORES_${localName.toUpperCase()}_${new Date().toISOString().split("T")[0]}.pdf`);
+    doc.save(`INFORME_INDICADORES_${localName.toUpperCase()}_${todayBogota()}.pdf`);
   };
 
   return (

@@ -54,6 +54,9 @@ export default function PDFUploader({
   const [isProcessing, setIsProcessing] = useState(false);
   const [processStep, setProcessStep] = useState("");
   const [showTools, setShowTools] = useState(false);
+  const [parseError, setParseError] = useState("");
+  // Los casos de simulación permiten "aprobar" con cifras inventadas: solo en desarrollo.
+  const showTestTools = import.meta.env.DEV;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Formateador de moneda colombiana COP
@@ -324,6 +327,11 @@ export default function PDFUploader({
       }
     }
 
+    if (efectivoPOS === 0 && tarjetasPOS === 0 && justoPOS === 0 && rappiPOS === 0 && transferenciasPOS === 0) {
+      setParseError(`No se reconocieron valores de venta en "${fileName}". Verifica que sea el reporte de cierre del POS o ingresa los valores manualmente abajo.`);
+      return;
+    }
+
     let anulacionesNote = "";
     if (anulaciones.length > 0) {
       anulacionesNote = `⚠️ Novedad detectada: ` + anulaciones.map(a => a.reason).join(", ") + `.`;
@@ -341,6 +349,7 @@ export default function PDFUploader({
   };
 
   const handleFile = (file: File) => {
+    setParseError("");
     const reader = new FileReader();
 
     if (file.name.toLowerCase().endsWith(".pdf")) {
@@ -397,16 +406,13 @@ export default function PDFUploader({
 
           processExtractedText(extractedText, file.name);
         } catch (err: any) {
-          console.warn("Fallo de lectura PDF directo, aplicando fallback:", err);
-          // Fallback predeterminado usando valores del cierre
-          startProcessing({
-            efectivoPOS: cierre.efectivoCierre,
-            tarjetasPOS: cierre.datafonoCierre,
-            justoPOS: cierre.justoCierre,
-            rappiPOS: cierre.rappiCierre,
-            transferenciasPOS: cierre.transferenciasCierre || 0,
-            fileName: file.name
-          });
+          // Nunca rellenar el POS con lo declarado por la tienda: ocultaría un faltante real.
+          console.warn("No se pudo leer el PDF del POS:", err);
+          setParseError(
+            err?.message === "Sin texto seleccionable"
+              ? `El PDF "${file.name}" no tiene texto seleccionable (¿es una imagen escaneada?). Exporta el reporte desde el POS o ingresa los valores manualmente.`
+              : `No se pudo leer "${file.name}". Intenta de nuevo o ingresa los valores manualmente.`
+          );
         }
       };
       reader.readAsArrayBuffer(file);
@@ -558,7 +564,14 @@ export default function PDFUploader({
         </div>
       </div>
 
+      {parseError && (
+        <div role="alert" className="bg-red-50 border border-red-300 text-red-800 text-xs font-bold p-3 rounded-lg">
+          {parseError}
+        </div>
+      )}
+
       {/* Botón de acordeón para herramientas opcionales de prueba / simulación */}
+      {showTestTools && (
       <div className="flex justify-between items-center pt-0.5">
         <button
           type="button"
@@ -575,8 +588,10 @@ export default function PDFUploader({
         </span>
       </div>
 
+      )}
+
       {/* Acordeón Plegable con Casos de Prueba Rápidos y Generador */}
-      {showTools && (
+      {showTestTools && showTools && (
         <div className="border border-brand-ink/20 bg-white p-4 rounded-lg space-y-4 shadow-sm animate-in fade-in duration-200">
           <div>
             <h5 className="text-xs font-black text-brand-ink uppercase tracking-wider mb-2 flex items-center gap-1.5">

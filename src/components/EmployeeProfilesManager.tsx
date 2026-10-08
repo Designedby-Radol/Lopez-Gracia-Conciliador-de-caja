@@ -47,6 +47,7 @@ import {
 } from "../utils/hrStore";
 import { dbAdapter } from "../db/dbAdapter";
 import { ROLE_POINTS_MAP, getRolePoints } from "../data/turnosDefaults";
+import { todayBogota } from "../lib/dates";
 
 interface EmployeeProfilesManagerProps {
   teamMembers: any[];
@@ -118,7 +119,7 @@ export const EmployeeProfilesManager: React.FC<EmployeeProfilesManagerProps> = (
   const [newMemberArea, setNewMemberArea] = useState<"Ventas" | "Pastelería">("Ventas");
   const [newMemberSalario, setNewMemberSalario] = useState<number>(smmlvBase);
   const [newMemberTipoContrato, setNewMemberTipoContrato] = useState<"Indefinido" | "Por días" | "Término Fijo" | "Obra o Labor">("Indefinido");
-  const [newMemberFechaIngreso, setNewMemberFechaIngreso] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [newMemberFechaIngreso, setNewMemberFechaIngreso] = useState<string>(todayBogota());
   const [newMemberTelefono, setNewMemberTelefono] = useState("");
   const [newMemberEmail, setNewMemberEmail] = useState("");
 
@@ -143,8 +144,8 @@ export const EmployeeProfilesManager: React.FC<EmployeeProfilesManagerProps> = (
   // 3. Registrar Vacaciones / Permiso / Incapacidad
   const [isAddingVacation, setIsAddingVacation] = useState(false);
   const [newVacationType, setNewVacationType] = useState<"Vacaciones Disfrutadas" | "Vacaciones Compensadas en Dinero" | "Permiso Remunerado" | "Permiso No Remunerado" | "Incapacidad Médica (EPS)" | "Licencia Legal">("Vacaciones Disfrutadas");
-  const [newVacationStart, setNewVacationStart] = useState(new Date().toISOString().split("T")[0]);
-  const [newVacationEnd, setNewVacationEnd] = useState(new Date().toISOString().split("T")[0]);
+  const [newVacationStart, setNewVacationStart] = useState(todayBogota());
+  const [newVacationEnd, setNewVacationEnd] = useState(todayBogota());
   const [newVacationDays, setNewVacationDays] = useState<number>(15);
   const [newVacationPeriod, setNewVacationPeriod] = useState("2025 - 2026");
   const [newVacationNotes, setNewVacationNotes] = useState("");
@@ -303,7 +304,7 @@ export const EmployeeProfilesManager: React.FC<EmployeeProfilesManagerProps> = (
     const currentCfg = getEmployeeData(selectedEmployee);
     const newBonus: EmployeeBonusRecord = {
       id: "bono-" + Date.now(),
-      fecha: new Date().toISOString().split("T")[0],
+      fecha: todayBogota(),
       concepto: newBonusConcept.trim() || "Bono de Desempeño",
       monto: Number(newBonusAmount) || 0,
       tipologia: newBonusType,
@@ -332,7 +333,7 @@ export const EmployeeProfilesManager: React.FC<EmployeeProfilesManagerProps> = (
     const currentCfg = getEmployeeData(selectedEmployee);
     const newSanction: DisciplinarySanction = {
       id: "sancion-" + Date.now(),
-      fecha: new Date().toISOString().split("T")[0],
+      fecha: todayBogota(),
       tipo: newSanctionType,
       gravedad: newSanctionSeverity,
       motivo: newSanctionReason.trim(),

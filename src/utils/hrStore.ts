@@ -6,6 +6,7 @@ import {
   VacationPeriod,
   DailySchedule 
 } from "../types";
+import { todayBogota } from "../lib/dates";
 
 const HR_STORAGE_KEY = "lopez_gracia_hr_profiles_config_v2";
 
@@ -180,7 +181,7 @@ class HRStore {
       sanciones: [],
       vacaciones: [],
       hrProfile: {
-        fechaIngreso: new Date().toISOString().split("T")[0],
+        fechaIngreso: todayBogota(),
         eps: "Compensar",
         arl: "SURA (Riesgo I)",
         fondoPensiones: "Porvenir",

@@ -31,6 +31,7 @@ import {
   Brush
 } from "lucide-react";
 import { getScheduledTasksForDate, isColombianHoliday, weekHasMondayHoliday } from "../utils/colombiaHolidays";
+import { todayBogota } from "../lib/dates";
 
 export interface ChecklistTask {
   id: string;
@@ -419,7 +420,7 @@ export default function OperationalChecklist({
   const [activeTab, setActiveTab] = useState<"new" | "history">("new");
   const [currentPhase, setCurrentPhase] = useState<"apertura" | "turno" | "cierre">("apertura");
   const [viewMode, setViewMode] = useState<"stepped" | "all">("stepped");
-  const [fecha, setFecha] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [fecha, setFecha] = useState<string>(() => todayBogota());
   const [turno, setTurno] = useState<"mañana" | "tarde" | "completo">("completo");
   const [observacionesGenerales, setObservacionesGenerales] = useState("");
   const [saveSuccess, setSaveSuccess] = useState(false);

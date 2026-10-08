@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { 
   BarChart3, 
   CheckCircle, 
@@ -79,7 +79,10 @@ import SalariesManager, {
   parseNumberFromDots
 } from "./SalariesManager";
 import SecurityAndRoles from "./SecurityAndRoles";
+import { repartirPropinas, repartirPropinasEquitativo } from "../lib/tips";
+import { calcularDiferencias,faltanteCobrable, repartirDescuadre, resolverPosCanales, canalesSinValidar } from "../lib/discrepancy";
 import { EmployeeProfilesManager } from "./EmployeeProfilesManager";
+import { todayBogota, addDaysIso } from "../lib/dates";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -109,7 +112,7 @@ export const getRolePoints = (roleName: string): number => {
   if (ROLE_POINTS_MAP[clean] !== undefined) return ROLE_POINTS_MAP[clean];
 
   const lower = clean.toLowerCase();
-  if (lower.includes("gerente")) return 0.0;
+  if (lower.includes("geren") || lower.includes("admin")) return 0.0;
   if (lower.includes("lider de punto") || lower.includes("líder de punto") || lower.includes("operador") || (lower.includes("lider") && !lower.includes("pasteler")) || (lower.includes("líder") && !lower.includes("pasteler"))) return 2.0;
   if (lower.includes("pasteler")) {
     if (lower.includes("líder") || lower.includes("lider")) return 1.5;
@@ -165,12 +168,10 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
   // Estados para Liquidación de Propinas
   const [propinasStartDate, setPropinasStartDate] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 15);
-    return d.toISOString().split("T")[0];
+    return addDaysIso(todayBogota(), -15);
   });
   const [propinasEndDate, setPropinasEndDate] = useState<string>(() => {
-    return new Date().toISOString().split("T")[0];
+    return todayBogota();
   });
   const [selectedCierreIdsForPropinas, setSelectedCierreIdsForPropinas] = useState<string[]>([]);
   const [propinasDaysTeam, setPropinasDaysTeam] = useState<Record<string, string[]>>({});
@@ -418,10 +419,11 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     const member = teamMembers.find(m => m.nombre.toLowerCase() === name.toLowerCase());
     if (member) {
       const role = member.role;
-      const puntos = getRolePoints(role);
+      const apto = typeof member.aptoPropinas === "boolean" ? member.aptoPropinas : true;
       return {
-        puntos,
-        apto: typeof member.aptoPropinas === "boolean" ? member.aptoPropinas : true,
+        // Un colaborador marcado como no apto no suma puntos en el reparto.
+        puntos: apto ? getRolePoints(role) : 0,
+        apto,
         role: member.role
       };
     }
@@ -512,9 +514,8 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
         }
       });
       const knownNames: string[] = Array.from(knownNamesSet);
-      if (knownNames.length === 0) {
-        knownNames.push("Juan Pérez", "María Gómez", "Carlos Ruiz", "Ana Martínez", "Luis Castro");
-      }
+      // Colaboradores registrados también cuentan como nombres conocidos.
+      teamMembers.forEach((m: any) => { if (m.nombre && !knownNames.includes(m.nombre)) knownNames.push(m.nombre); });
 
       // Parser de PDF de Asistencia avanzado por documento e identificación de días
       const docRegex = /\b\d{8,11}\b/g;
@@ -782,6 +783,8 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     }
   };
 
+  const selectCierreRequestRef = useRef(0);
+
   const handleDeleteCierre = async (id: string) => {
     try {
       await dbAdapter.deleteCierre(id);
@@ -796,7 +799,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
   const loadCierres = async () => {
     setIsLoading(true);
     try {
-      const data = await dbAdapter.getCierres();
+      const data = await dbAdapter.getCierres(local);
       setCierres(data);
     } catch (err) {
       console.error("Error al cargar cierres de caja:", err);
@@ -807,7 +810,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
   useEffect(() => {
     loadCierres();
-  }, []);
+  }, [local]);
 
   useEffect(() => {
     if (activeTab === "audit" && auditSubTab === "pending" && !selectedCierreId && cierres.length > 0) {
@@ -819,6 +822,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
   }, [activeTab, auditSubTab, cierres, selectedCierreId]);
 
   const handleSelectCierre = async (id: string) => {
+    const requestId = ++selectCierreRequestRef.current;
     setSelectedCierreId(id);
     setTransferenciasCoincide(false);
 
@@ -871,6 +875,9 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                   return { configurado: false };
                 }),
             ]);
+
+            // Si el gerente ya seleccionó otro cierre, descartar esta respuesta.
+            if (requestId !== selectCierreRequestRef.current) return;
 
             // Si IntuiPOS está configurado para ese local, poblar la columna POS y auto-completar canales
             if (intuiposResp?.configurado) {
@@ -1006,88 +1013,86 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     );
   };
 
+  /** Cálculo único de diferencias y reparto 60/40 (vista previa = lo que se guarda). */
+  const computeConciliacion = (cierre: CierreCaja) => {
+    const pos = resolverPosCanales(posData, cierre);
+    const input = {
+      efectivoDeclarado: cierre.efectivoCierre,
+      datafonoDeclarado: cierre.datafonoCierre,
+      efectivoPOS: reconcileEfectivo,
+      datafonoPOS: reconcileDatafono,
+      ...pos,
+      justoReal: reconcileJusto,
+      rappiReal: reconcileRappi,
+      transferenciasReal: reconcileTransferencias,
+    };
+    const dif = calcularDiferencias(input);
+    const faltante = faltanteCobrable(dif);
+    const lider = liderInputName.trim() || cierre.colaboradorNombre || "";
+    const reparto = repartirDescuadre(faltante, lider, auxiliaresInputList, teamMembers);
+    return { input, pos, dif, faltante, reparto, sinValidar: canalesSinValidar(input) };
+  };
+
+  const [isApproving, setIsApproving] = useState(false);
+
   // Guardar y aprobar conciliación (Paso 1 es opcional)
   const handleApproveConciliation = async (cierre: CierreCaja) => {
-    // Si no se cargó reporte POS, usar valores de conciliación o registrados previamente
-    const posEfectivo = posData ? posData.efectivoPOS : (cierre.efectivoPOS ?? reconcileEfectivo);
-    const posTarjetas = posData ? posData.tarjetasPOS : (cierre.tarjetasPOS ?? reconcileDatafono);
-    const posJusto = posData ? posData.justoPOS : (cierre.justoPOS ?? reconcileJusto);
-    const posRappi = posData ? posData.rappiPOS : (cierre.rappiPOS ?? reconcileRappi);
-    const posTransferencias = posData ? posData.transferenciasPOS : (cierre.transferenciasPOS ?? reconcileTransferencias);
+    if (isApproving) return;
+    const { pos, dif, reparto, sinValidar } = computeConciliacion(cierre);
 
-    const difEfectivo = cierre.efectivoCierre - reconcileEfectivo;
-    const difTarjetas = cierre.datafonoCierre - reconcileDatafono;
-    const difJusto = reconcileJusto - posJusto;
-    const difRappi = reconcileRappi - posRappi;
-    const difTransferencias = reconcileTransferencias - posTransferencias;
-
-    const totalDif = difEfectivo + difTarjetas + difJusto + difRappi + difTransferencias;
-
-    let descuadreLider = 0;
-    let descuadreAuxiliar = 0;
-
-    if (totalDif < 0) {
-      const shortage = Math.abs(totalDif);
-      descuadreLider = Math.round(shortage * 0.6);
-      const remaining40 = shortage - descuadreLider;
-
-      // Política de descuadres (60/40) con los nuevos cargos:
-      // Solo participan auxiliares en turno con cargo Asistente de servicio / Auxiliar Pasteleria.
-      // Se excluyen explícitamente: Gerencia, admin, y Lider Pasteleria (responde por producción, no por caja).
-      const eligibleAuxiliares = auxiliaresInputList.filter((auxName) => {
-        const member = teamMembers.find(m => m.nombre.toLowerCase() === auxName.toLowerCase());
-        if (!member) return true;
-        const c = (member.cargo || member.role || "").toLowerCase();
-        return !c.includes("geren") && !c.includes("admin") && !c.includes("lider pasteler") && !c.includes("líder de pasteler");
-      });
-
-      if (eligibleAuxiliares.length > 0) {
-        descuadreAuxiliar = Math.round(remaining40 / eligibleAuxiliares.length);
-      }
+    if (sinValidar.length > 0) {
+      const ok = window.confirm(
+        `No ingresaste el valor real validado de: ${sinValidar.join(", ")}.\n\n` +
+        `Si apruebas así, se registrará un faltante igual a toda la venta del POS en ese canal` +
+        (reparto.faltante > 0 ? ` y se cobrará al equipo según la política 60/40.` : `.`) +
+        `\n\n¿Aprobar de todas formas?`
+      );
+      if (!ok) return;
     }
 
     const updates: Partial<CierreCaja> = {
       estado: "Cuadrado",
-      efectivoPOS: posEfectivo,
-      tarjetasPOS: posTarjetas,
-      justoPOS: posJusto,
-      rappiPOS: posRappi,
-      transferenciasPOS: posTransferencias,
-      
-      // Save the final reconciled values back to the main closure object
+      // Se guardan exactamente los valores POS usados en el cálculo.
+      efectivoPOS: reconcileEfectivo,
+      tarjetasPOS: reconcileDatafono,
+      justoPOS: pos.justoPOS,
+      rappiPOS: pos.rappiPOS,
+      transferenciasPOS: pos.transferenciasPOS,
+
+      // Valores reales validados por Gerencia
       justoCierre: reconcileJusto,
       rappiCierre: reconcileRappi,
       transferenciasCierre: reconcileTransferencias,
-      
-      difEfectivo,
-      difTarjetas,
-      difJusto,
-      difRappi,
-      difTransferencias,
-      auditadoPor: username,
+
+      difEfectivo: dif.efectivo,
+      difTarjetas: dif.tarjetas,
+      difJusto: dif.justo,
+      difRappi: dif.rappi,
+      difTransferencias: dif.transferencias,
       auditadoAt: new Date().toISOString(),
       posFileName: posData?.fileName || cierre.posFileName || "Auditoría Directa (Sin Reporte POS)",
-      novedades: posData?.anulacionesNote 
+      novedades: posData?.anulacionesNote
         ? (cierre.novedades ? `${cierre.novedades} | ${posData.anulacionesNote}` : posData.anulacionesNote)
         : cierre.novedades,
-      // Guardar información del equipo y política de descuentos
       liderNombre: liderInputName.trim() || cierre.colaboradorNombre || "N/A",
-      auxiliaresNombres: auxiliaresInputList,
-      descuadreLider,
-      descuadreAuxiliar
+      auxiliaresNombres: reparto.auxiliaresElegibles,
+      descuadreLider: reparto.lider,
+      descuadreAuxiliar: reparto.porAuxiliar,
     };
 
+    setIsApproving(true);
     try {
       await dbAdapter.updateCierre(cierre.id, updates);
       setSelectedCierreId(null);
       setPosData(null);
       await loadCierres();
-      // Cambiar a la pestaña de historial de cierres para ver el resultado cargado
       setActiveTab("audit");
       setAuditSubTab("history");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error al aprobar conciliación:", error);
-      alert("Hubo un error al procesar la aprobación.");
+      alert(`No se pudo aprobar la conciliación: ${error?.message || "error desconocido"}`);
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -1123,12 +1128,10 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
   // Filtros de fecha para métricas
   const [metricsFilter, setMetricsFilter] = useState<"all" | "month" | "custom">("all");
   const [metricsStartDate, setMetricsStartDate] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 7);
-    return d.toISOString().split("T")[0];
+    return addDaysIso(todayBogota(), -7);
   });
   const [metricsEndDate, setMetricsEndDate] = useState<string>(() => {
-    return new Date().toISOString().split("T")[0];
+    return todayBogota();
   });
 
   const filteredMetricsCierres = useMemo(() => {
@@ -1542,7 +1545,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
         doc.text(`Documento generado de manera segura por el Panel Administrativo el ${new Date().toLocaleString("es-CO")}`, 13, 283);
       }
 
-      const dateStr = new Date().toISOString().split("T")[0];
+      const dateStr = todayBogota();
       doc.save(`historial_cierres_${dateStr}.pdf`);
     } catch (error) {
       console.error("Error al exportar PDF:", error);
@@ -1647,11 +1650,12 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
             puntos: getMemberConfig(name, c.id).puntos
           }));
           const totalPoints = teamPoints.reduce((acc, p) => acc + p.puntos, 0);
-          
+          const shares = repartirPropinas(dayTips, teamPoints);
+
           shareText = `Reparto por Puntos (Total Pts: ${totalPoints})`;
-          rosterText = teamPoints.length > 0 
+          rosterText = teamPoints.length > 0
             ? `Personal (Puntos/Reparto): ${teamPoints.map(tp => {
-                const pShare = totalPoints > 0 ? Math.round(dayTips * (tp.puntos / totalPoints)) : 0;
+                const pShare = shares[tp.name] ?? 0;
                 return `${tp.name} (${tp.puntos} pts: ${formatCOPPdf(pShare)})`;
               }).join(", ")}`
             : "No se asignó personal en este turno.";
@@ -1728,7 +1732,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
       doc.text("C.C. _________________________", 115, currentY + 8);
 
       // Save document
-      const dateStr = new Date().toISOString().split("T")[0];
+      const dateStr = todayBogota();
       doc.save(`liquidacion_propinas_${dateStr}.pdf`);
     } catch (error) {
       console.error("Error al exportar reporte de propinas:", error);
@@ -3127,21 +3131,13 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
                           {/* SECCIÓN DEL EQUIPO DEL TURNO Y DISTRIBUCIÓN DE DESCUADRES (POLÍTICA 60/40) */}
                           {(() => {
-                            const posJ = posData ? posData.justoPOS : (currentCierre.justoPOS ?? currentCierre.justoCierre ?? 0);
-                            const posR = posData ? posData.rappiPOS : (currentCierre.rappiPOS ?? currentCierre.rappiCierre ?? 0);
-                            const posT = posData ? posData.transferenciasPOS : (currentCierre.transferenciasPOS ?? currentCierre.transferenciasCierre ?? 0);
-
-                            const totalDif = (currentCierre.efectivoCierre - reconcileEfectivo) +
-                                             (currentCierre.datafonoCierre - reconcileDatafono) +
-                                             (reconcileJusto - posJ) +
-                                             (reconcileRappi - posR) +
-                                             (reconcileTransferencias - posT);
-
-                            const shortage = totalDif < 0 ? Math.abs(totalDif) : 0;
-                            const shareLider = Math.round(shortage * 0.6);
-                            const shareAuxiliaresTotal = shortage - shareLider;
+                            const { reparto } = computeConciliacion(currentCierre);
+                            const shortage = reparto.faltante;
+                            const shareLider = reparto.lider;
                             const numAuxiliares = auxiliaresInputList.length;
-                            const shareAuxiliarIndividual = numAuxiliares > 0 ? Math.round(shareAuxiliaresTotal / numAuxiliares) : 0;
+                            const numElegibles = reparto.auxiliaresElegibles.length;
+                            const shareAuxiliarIndividual = reparto.porAuxiliar;
+                            const shareAuxiliaresTotal = shareAuxiliarIndividual * numElegibles;
 
                             return (
                               <div className="bg-brand-bg p-5 border-2 border-brand-ink space-y-4 shadow-[2px_2px_0px_0px_#1C1917]">
@@ -3263,7 +3259,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 font-mono text-xs">
                                       {/* Distribución Líder */}
                                       <div className="bg-white p-2.5 border border-brand-ink text-brand-ink">
-                                        <div className="text-[9px] font-black uppercase tracking-wider text-brand-ink/50">Líder de Punto (60%)</div>
+                                        <div className="text-[9px] font-black uppercase tracking-wider text-brand-ink/50">Líder de Punto ({numElegibles > 0 ? "60%" : "100%"})</div>
                                         <div className="font-bold text-brand-ink truncate mt-0.5">{liderInputName || "Sin asignar"}</div>
                                         <div className="text-sm font-black text-brand-danger mt-1">{formatCOP(shareLider)}</div>
                                       </div>
@@ -3272,23 +3268,28 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                       <div className="bg-white p-2.5 border border-brand-ink text-brand-ink">
                                         <div className="text-[9px] font-black uppercase tracking-wider text-brand-ink/50">Auxiliares (40% Total)</div>
                                         <div className="font-bold text-brand-ink truncate mt-0.5">
-                                          {numAuxiliares > 0 
-                                            ? `${numAuxiliares} personas (${formatCOP(shareAuxiliaresTotal)})` 
-                                            : "Sin auxiliares (Líder asume 100%)"
+                                          {numElegibles > 0
+                                            ? `${numElegibles} personas (${formatCOP(shareAuxiliaresTotal)})`
+                                            : "Sin auxiliares elegibles (Líder asume 100%)"
                                           }
                                         </div>
                                         <div className="text-sm font-black text-brand-danger mt-1">
-                                          {numAuxiliares > 0 
-                                            ? `${formatCOP(shareAuxiliarIndividual)} c/u` 
-                                            : formatCOP(shareAuxiliaresTotal) + " (Líder asume)"
+                                          {numElegibles > 0
+                                            ? `${formatCOP(shareAuxiliarIndividual)} c/u`
+                                            : "Incluido en el líder"
                                           }
                                         </div>
                                       </div>
                                     </div>
 
-                                    {numAuxiliares === 0 && (
+                                    {numElegibles === 0 && (
                                       <div className="bg-amber-50 border border-amber-500 p-2 text-amber-800 text-[10px] font-bold mt-1 uppercase tracking-wide">
-                                        ⚠️ Atención: Al no registrar auxiliares, el 40% restante será sumado al cobro del Líder de Punto para cubrir el total del faltante.
+                                        ⚠️ Atención: Al no haber auxiliares elegibles, el 40% restante se suma al cobro del Líder de Punto para cubrir el total del faltante.
+                                      </div>
+                                    )}
+                                    {reparto.excluidos.length > 0 && (
+                                      <div className="bg-white border border-brand-ink/30 p-2 text-brand-ink text-[11px] font-bold mt-1">
+                                        No participan del 40%: {reparto.excluidos.map((e) => `${e.nombre} (${e.motivo})`).join(" · ")}
                                       </div>
                                     )}
                                   </div>
@@ -3309,15 +3310,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
                           {/* Resumen Final de Conciliación */}
                           {(() => {
-                            const posJ = posData ? posData.justoPOS : (currentCierre.justoPOS ?? currentCierre.justoCierre ?? 0);
-                            const posR = posData ? posData.rappiPOS : (currentCierre.rappiPOS ?? currentCierre.rappiCierre ?? 0);
-                            const posT = posData ? posData.transferenciasPOS : (currentCierre.transferenciasPOS ?? currentCierre.transferenciasCierre ?? 0);
-
-                            const totalDif = (currentCierre.efectivoCierre - reconcileEfectivo) +
-                                             (currentCierre.datafonoCierre - reconcileDatafono) +
-                                             (reconcileJusto - posJ) +
-                                             (reconcileRappi - posR) +
-                                             (reconcileTransferencias - posT);
+                            const totalDif = computeConciliacion(currentCierre).dif.total;
 
                             return (
                               <div className="bg-brand-bg border-2 border-brand-ink p-4 flex flex-col sm:flex-row justify-between items-center gap-3 shadow-[2px_2px_0px_0px_#1C1917]">
@@ -3335,7 +3328,8 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
                                 <button
                                   onClick={() => handleApproveConciliation(currentCierre)}
-                                  className="px-5 py-2.5 bg-brand-ink text-white hover:bg-black font-black uppercase tracking-wider transition-all flex items-center space-x-1.5 shadow-[3px_3px_0px_0px_#D4D4D8] cursor-pointer border-2 border-brand-ink"
+                                  disabled={isApproving}
+                                  className="disabled:opacity-50 px-5 py-2.5 bg-brand-ink text-white hover:bg-black font-black uppercase tracking-wider transition-all flex items-center space-x-1.5 shadow-[3px_3px_0px_0px_#D4D4D8] cursor-pointer border-2 border-brand-ink"
                                 >
                                   <FileCheck className="w-4 h-4" />
                                   <span>Aprobar y Finalizar Cuadre</span>
@@ -3914,7 +3908,8 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                     )}
                   </div>
 
-                  {/* Botones de simulación rápida para evaluación */}
+                  {/* Botones de simulación rápida (solo desarrollo: reemplazan el roster real con nombres ficticios) */}
+                  {import.meta.env.DEV && (
                   <div className="space-y-2 pt-2">
                     <span className="text-[9px] font-black uppercase tracking-wider text-brand-ink/50 block">SIMULAR CARGA DE HORAS POS (RÁPIDO)</span>
                     <div className="grid grid-cols-2 gap-2">
@@ -3994,6 +3989,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                       </button>
                     </div>
                   </div>
+                  )}
                 </div>
               </div>
 
@@ -4031,6 +4027,9 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                         const dayTips = c.propinas || 0;
                         const sharePerPerson = team.length > 0 ? Math.round(dayTips / team.length) : 0;
                         const totalPointsOnDay = team.reduce((sum, n) => sum + getMemberConfig(n, c.id).puntos, 0);
+                        const dayShares = tipDistributionMode === "puntos"
+                          ? repartirPropinas(dayTips, team.map(n => ({ name: n, puntos: getMemberConfig(n, c.id).puntos })))
+                          : repartirPropinasEquitativo(dayTips, team);
 
                         return (
                           <div key={c.id} className="border border-brand-ink p-3 bg-brand-bg/40 space-y-2.5">
@@ -4057,9 +4056,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                               {team.map((name, nameIdx) => {
                                 const config = getMemberConfig(name, c.id);
                                 const isAsistente = config.role.toLowerCase().includes("asistente de servicio") || config.role.toLowerCase().includes("aux de venta");
-                                const memberShare = tipDistributionMode === "puntos"
-                                  ? (totalPointsOnDay > 0 ? Math.round(dayTips * (config.puntos / totalPointsOnDay)) : 0)
-                                  : sharePerPerson;
+                                const memberShare = dayShares[name] ?? 0;
                                 return (
                                   <span
                                     key={nameIdx}
@@ -4250,12 +4247,12 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                       if (tipDistributionMode === "puntos") {
                         const teamPoints = team.map(name => ({
                           name,
-                          puntos: getMemberConfig(name).puntos
+                          puntos: getMemberConfig(name, c.id).puntos
                         }));
-                        const totalPoints = teamPoints.reduce((acc, p) => acc + p.puntos, 0);
-                        
+                        const shares = repartirPropinas(dayTips, teamPoints);
+
                         teamPoints.forEach(tp => {
-                          const share = totalPoints > 0 ? Math.round(dayTips * (tp.puntos / totalPoints)) : 0;
+                          const share = shares[tp.name] ?? 0;
                           if (!personEarnings[tp.name]) {
                             personEarnings[tp.name] = { days: [], amount: 0, totalPointsAssigned: tp.puntos };
                           }
@@ -4264,13 +4261,13 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                         });
                       } else {
                         // Equitativo
-                        const share = team.length > 0 ? Math.round(dayTips / team.length) : 0;
+                        const shares = repartirPropinasEquitativo(dayTips, team);
                         team.forEach(name => {
                           if (!personEarnings[name]) {
                             personEarnings[name] = { days: [], amount: 0, totalPointsAssigned: 1 };
                           }
                           personEarnings[name].days.push(c.fecha);
-                          personEarnings[name].amount += share;
+                          personEarnings[name].amount += shares[name] ?? 0;
                         });
                       }
                     });
