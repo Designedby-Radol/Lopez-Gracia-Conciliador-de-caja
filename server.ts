@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import { loadSession } from "./server/auth";
 import { authRouter, adminRouter } from "./server/routes/auth";
 import { dbRouter } from "./server/routes/db";
+import { operacionRouter } from "./server/routes/operacion";
 import { canalesRouter } from "./server/routes/canales";
 import { geminiRouter } from "./server/routes/gemini";
 
@@ -30,6 +31,7 @@ async function startServer() {
   app.use("/api/auth", authRouter);
   app.use("/api/admin", adminRouter);
   app.use("/api/db", dbRouter);
+  app.use("/api/db", operacionRouter);
   app.use("/api/canales", canalesRouter);
   app.use("/api/gemini", geminiRouter);
 

@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import { getScheduledTasksForDate, isColombianHoliday, weekHasMondayHoliday } from "../utils/colombiaHolidays";
 import { todayBogota } from "../lib/dates";
+import { operacionAdapter } from "../db/operacionAdapter";
 
 export interface ChecklistTask {
   id: string;
@@ -353,7 +354,6 @@ export function buildInitialTasksForDate(dateStr: string): ChecklistTask[] {
   return [...base, ...additional];
 }
 
-const LOCAL_STORAGE_CHECKLIST_KEY = "lopez_gracia_checklists_history";
 
 // Sintetizador de audio con Web Audio API para timbre de alarma 1:30 PM
 function playAlarmChimeSequence() {
@@ -456,16 +456,11 @@ export default function OperationalChecklist({
     loadHistory();
   }, []);
 
-  const loadHistory = () => {
+  const loadHistory = async () => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_CHECKLIST_KEY);
-      if (saved) {
-        setRecords(JSON.parse(saved));
-      } else {
-        setRecords([]);
-      }
+      setRecords(await operacionAdapter.getRegistros<OperationalChecklistRecord>("checklist", localName));
     } catch (e) {
-      console.error("Error loading checklists history:", e);
+      console.error("Error cargando historial de checklists:", e);
     }
   };
 
@@ -622,8 +617,11 @@ export default function OperationalChecklist({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
 
     const newRecord: OperationalChecklistRecord = {
       id: `chk-rec-${Date.now()}`,
@@ -641,10 +639,16 @@ export default function OperationalChecklist({
       tasks: tasks.map(t => ({ ...t }))
     };
 
-    const updatedRecords = [newRecord, ...records];
-    setRecords(updatedRecords);
-    localStorage.setItem(LOCAL_STORAGE_CHECKLIST_KEY, JSON.stringify(updatedRecords));
-    localStorage.setItem("lopez_gracia_checklists", JSON.stringify(updatedRecords));
+    setIsSaving(true);
+    try {
+      const saved = await operacionAdapter.saveRegistro("checklist", newRecord, localName);
+      setRecords(prev => [saved, ...prev]);
+    } catch (err: any) {
+      alert(`No se pudo guardar el checklist: ${err?.message || "error"}. Intenta de nuevo.`);
+      return;
+    } finally {
+      setIsSaving(false);
+    }
 
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 4000);

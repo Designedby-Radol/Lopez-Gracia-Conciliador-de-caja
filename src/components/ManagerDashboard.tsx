@@ -79,6 +79,7 @@ import SalariesManager, {
   parseNumberFromDots
 } from "./SalariesManager";
 import SecurityAndRoles from "./SecurityAndRoles";
+import { hrStore } from "../utils/hrStore";
 import { repartirPropinas, repartirPropinasEquitativo } from "../lib/tips";
 import { calcularDiferencias,faltanteCobrable, repartirDescuadre, resolverPosCanales, canalesSinValidar } from "../lib/discrepancy";
 import { EmployeeProfilesManager } from "./EmployeeProfilesManager";
@@ -217,7 +218,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     const nameClean = member?.nombre || "";
     const role = member?.role || "Asistente de Servicio";
     const defaultPoints = ROLE_POINTS_MAP[role] !== undefined ? ROLE_POINTS_MAP[role] : 1.0;
-    const smmlv = Number(localStorage.getItem("lopez_gracia_smmlv_base")) || 1750905;
+    const smmlv = smmlvBase;
 
     if (nameClean && salariesConfig[nameClean]) {
       const cfg = { ...salariesConfig[nameClean] };
@@ -257,7 +258,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     };
 
     if (updatedField === "salarioBaseMensual") {
-      const smmlv = Number(localStorage.getItem("lopez_gracia_smmlv_base")) || 1750905;
+      const smmlv = smmlvBase;
       updated.auxilioTransporteAplica = Number(value) <= (smmlv * 2);
     }
 
@@ -364,6 +365,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
       if (nomConfigGeneral) {
         if (nomConfigGeneral.smmlv_base) setSmmlvBase(Number(nomConfigGeneral.smmlv_base));
         if (nomConfigGeneral.aux_transporte_base) setAuxTranspBase(Number(nomConfigGeneral.aux_transporte_base));
+        hrStore.setParametrosNomina(Number(nomConfigGeneral.smmlv_base), Number(nomConfigGeneral.aux_transporte_base));
       }
     } catch (e) {
       console.error("Error al cargar configuraciones de nómina desde Supabase:", e);

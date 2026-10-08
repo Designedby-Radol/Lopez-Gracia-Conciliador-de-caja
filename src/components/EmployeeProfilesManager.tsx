@@ -64,8 +64,8 @@ export const EmployeeProfilesManager: React.FC<EmployeeProfilesManagerProps> = (
   onNavigateTab,
   onRefreshTeamMembers
 }) => {
-  const smmlvBase = Number(localStorage.getItem("lopez_gracia_smmlv_base")) || 1750905;
-  const auxTranspBase = Number(localStorage.getItem("lopez_gracia_aux_transp_base")) || 249095;
+  const smmlvBase = hrStore.smmlvBase;
+  const auxTranspBase = hrStore.auxTransporteBase;
 
   // Estados principales
   const [hrConfigs, setHrConfigs] = useState<Record<string, EmployeeSalaryConfig>>({});

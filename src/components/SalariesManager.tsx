@@ -1186,7 +1186,9 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
             devengadoTotal: rec.devengadoTotal,
             totalDeducciones: rec.deduccionesTotal,
             netoAPagar: rec.netoAPagar,
-            ...rec.desglose
+            ...rec.desglose,
+            // Marcaciones del período: alimentan el indicador de puntualidad
+            attendanceRecords: getNovedades(rec.empleadoNombre).attendanceRecords || []
           }
         });
       } catch (e: any) {

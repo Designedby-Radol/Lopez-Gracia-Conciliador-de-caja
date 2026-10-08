@@ -16,6 +16,7 @@ import {
   AlertCircle
 } from "lucide-react";
 import { todayBogota } from "../lib/dates";
+import { operacionAdapter } from "../db/operacionAdapter";
 
 export interface InsumoMaster {
   id: string;
@@ -61,7 +62,6 @@ const DEFAULT_INSUMOS: InsumoMaster[] = [
 ];
 
 const LOCAL_STORAGE_CATALOG_KEY = "lopez_gracia_inventory_master";
-const LOCAL_STORAGE_RECORDS_KEY = "lopez_gracia_inventory_closures";
 
 interface InventoryClosureProps {
   username: string;
@@ -106,32 +106,49 @@ export default function InventoryClosure({
     loadHistoryRecords();
   }, []);
 
-  const loadMasterCatalog = () => {
+  const [loadError, setLoadError] = useState("");
+
+  const loadMasterCatalog = async () => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_CATALOG_KEY);
-      if (saved) {
-        setCatalog(JSON.parse(saved));
-      } else {
-        localStorage.setItem(LOCAL_STORAGE_CATALOG_KEY, JSON.stringify(DEFAULT_INSUMOS));
-        setCatalog(DEFAULT_INSUMOS);
+      const remote = await operacionAdapter.getCatalogoInventario<InsumoMaster>();
+      if (remote && remote.length > 0) {
+        setCatalog(remote);
+        return;
       }
-    } catch (e) {
-      console.error("Error loading master catalog:", e);
+      // Primera vez: usar el catálogo que tenía este navegador (o el por defecto) como semilla.
+      let seed = DEFAULT_INSUMOS;
+      try {
+        const saved = localStorage.getItem(LOCAL_STORAGE_CATALOG_KEY);
+        if (saved) seed = JSON.parse(saved);
+      } catch { /* sin catálogo local */ }
+      setCatalog(seed);
+      await operacionAdapter.saveCatalogoInventario(seed).catch(() => undefined);
+    } catch (e: any) {
+      console.error("Error cargando catálogo de insumos:", e);
       setCatalog(DEFAULT_INSUMOS);
+      setLoadError(`No se pudo cargar el catálogo del servidor: ${e?.message || "error"}`);
     }
   };
 
-  const loadHistoryRecords = () => {
+  const loadHistoryRecords = async () => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_RECORDS_KEY);
-      if (saved) {
-        setRecords(JSON.parse(saved));
-      } else {
-        setRecords([]);
-      }
-    } catch (e) {
-      console.error("Error loading inventory records:", e);
+      setRecords(await operacionAdapter.getRegistros<InventoryClosureRecord>("inventario", localName));
+    } catch (e: any) {
+      console.error("Error cargando inventarios:", e);
+      setLoadError(`No se pudo cargar el historial de inventarios: ${e?.message || "error"}`);
     }
+  };
+
+  const persistCatalog = async (updated: InsumoMaster[], previous: InsumoMaster[]) => {
+    setCatalog(updated);
+    try {
+      await operacionAdapter.saveCatalogoInventario(updated);
+    } catch (e: any) {
+      setCatalog(previous);
+      alert(`No se pudo guardar el catálogo: ${e?.message || "error"}`);
+      return false;
+    }
+    return true;
   };
 
   // Sync count state when catalog changes or on initial setup
@@ -223,7 +240,7 @@ export default function InventoryClosure({
   };
 
   // Add new item to Master Catalog
-  const handleCreateInsumo = (e: React.FormEvent) => {
+  const handleCreateInsumo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newInsumoNombre.trim()) return;
 
@@ -234,9 +251,7 @@ export default function InventoryClosure({
       categoria: newInsumoCategoria
     };
 
-    const updatedCatalog = [...catalog, newItem];
-    setCatalog(updatedCatalog);
-    localStorage.setItem(LOCAL_STORAGE_CATALOG_KEY, JSON.stringify(updatedCatalog));
+    if (!(await persistCatalog([...catalog, newItem], catalog))) return;
 
     setNewInsumoNombre("");
     setNewInsumoUnidad("g");
@@ -245,15 +260,15 @@ export default function InventoryClosure({
   };
 
   // Remove insumo from master catalog
-  const handleDeleteInsumoFromCatalog = (id: string, nombre: string) => {
+  const handleDeleteInsumoFromCatalog = async (id: string, nombre: string) => {
     if (!confirm(`¿Eliminar el insumo "${nombre}" del catálogo maestro?`)) return;
-    const updated = catalog.filter(c => c.id !== id);
-    setCatalog(updated);
-    localStorage.setItem(LOCAL_STORAGE_CATALOG_KEY, JSON.stringify(updated));
+    await persistCatalog(catalog.filter(c => c.id !== id), catalog);
   };
 
   // Save Inventory Closure
-  const handleSubmitClosure = (e: React.FormEvent) => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSubmitClosure = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const selectedItems = itemsState.filter(i => i.selected && i.total > 0);
@@ -284,9 +299,17 @@ export default function InventoryClosure({
       }))
     };
 
-    const updatedRecords = [newRecord, ...records];
-    setRecords(updatedRecords);
-    localStorage.setItem(LOCAL_STORAGE_RECORDS_KEY, JSON.stringify(updatedRecords));
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      const saved = await operacionAdapter.saveRegistro("inventario", newRecord, localName);
+      setRecords(prev => [saved, ...prev]);
+    } catch (err: any) {
+      alert(`No se pudo guardar el inventario: ${err?.message || "error"}. Tus conteos siguen en pantalla; intenta de nuevo.`);
+      return;
+    } finally {
+      setIsSaving(false);
+    }
 
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 4000);
@@ -317,6 +340,9 @@ export default function InventoryClosure({
 
   return (
     <div className="space-y-6">
+      {loadError && (
+        <div role="alert" className="bg-red-50 border border-red-200 text-red-800 text-sm font-bold p-3 rounded-xl">{loadError}</div>
+      )}
       {/* Header Bar */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
