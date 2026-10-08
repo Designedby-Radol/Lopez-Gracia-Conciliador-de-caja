@@ -2,6 +2,7 @@ import { Router, type Request } from "express";
 import { supabaseAdmin, isValidUUID } from "../supabase";
 import { requireAuth, requireGerencia } from "../auth";
 import { writeAudit } from "../audit";
+import { resolverAuxiliares, resolverUsuario, aplanarAuxiliares, type UsuarioEquipo } from "../cierreEquipo";
 
 export const dbRouter = Router();
 dbRouter.use(requireAuth);
@@ -128,7 +129,60 @@ function pickColumns(body: any, columns: readonly string[]) {
   return out;
 }
 
-const CIERRE_SELECT = "*, colaborador:usuarios!colaborador_id(nombre), auditor:usuarios!auditado_por(nombre)";
+const CIERRE_SELECT =
+  "*, colaborador:usuarios!colaborador_id(nombre), auditor:usuarios!auditado_por(nombre), lider:usuarios!lider_id(nombre), " +
+  "auxiliares:cierre_auxiliares(usuario_id, usuario:usuarios(nombre))";
+
+async function cargarUsuariosEquipo(): Promise<UsuarioEquipo[]> {
+  const { data, error } = await supabaseAdmin.from("usuarios").select("id, nombre, email, cedula, local_id");
+  if (error) throw error;
+  return data || [];
+}
+
+/**
+ * Equipo del turno enviado por el cliente: `auxiliares_nombres` (nombres o UUID) y
+ * `lider_nombre` (solo si no llega un lider_id válido). Devuelve null si no se envió
+ * la lista de auxiliares (no se toca cierre_auxiliares). Si un auxiliar no se puede
+ * identificar se rechaza el guardado: perderlo deja sin registro quién pagó el 40%.
+ */
+async function resolverEquipo(body: any, localId: string | null, payload: Record<string, unknown>) {
+  const enviaAuxiliares = Array.isArray(body?.auxiliares_nombres);
+  const enviaLider = !isValidUUID(payload.lider_id) && typeof body?.lider_nombre === "string" && body.lider_nombre.trim();
+  if (!enviaAuxiliares && !enviaLider) return { auxiliares: null as string[] | null };
+
+  const usuarios = await cargarUsuariosEquipo();
+  if (enviaLider) {
+    const liderId = resolverUsuario(body.lider_nombre, usuarios, localId);
+    if (liderId) payload.lider_id = liderId;
+  }
+  if (!enviaAuxiliares) return { auxiliares: null };
+
+  const { ids, noEncontrados } = resolverAuxiliares(body.auxiliares_nombres, usuarios, localId);
+  if (noEncontrados.length > 0) {
+    return {
+      auxiliares: null,
+      error: `No se encontró en el equipo registrado a: ${noEncontrados.join(", ")}. Usa el nombre exacto del colaborador.`,
+    };
+  }
+  return { auxiliares: ids };
+}
+
+/** Reemplaza los auxiliares del cierre por la lista dada. */
+async function guardarAuxiliares(cierreId: string, usuarioIds: string[]) {
+  const { error: delErr } = await supabaseAdmin.from("cierre_auxiliares").delete().eq("cierre_id", cierreId);
+  if (delErr) throw delErr;
+  if (usuarioIds.length === 0) return;
+  const { error } = await supabaseAdmin
+    .from("cierre_auxiliares")
+    .insert(usuarioIds.map((usuario_id) => ({ cierre_id: cierreId, usuario_id })));
+  if (error) throw error;
+}
+
+async function leerCierre(id: string) {
+  const { data, error } = await supabaseAdmin.from("cierres_caja").select(CIERRE_SELECT).eq("id", id).single();
+  if (error) throw error;
+  return aplanarAuxiliares(data);
+}
 
 dbRouter.get("/cierres", async (req, res) => {
   const localId = scopedLocalId(req);
@@ -142,7 +196,7 @@ dbRouter.get("/cierres", async (req, res) => {
   if (localId) query = query.eq("local_id", localId);
   const { data, error } = await query;
   if (error) return fail(res, "GET /cierres", error);
-  res.json({ success: true, data: data || [] });
+  res.json({ success: true, data: (data || []).map(aplanarAuxiliares) });
 });
 
 dbRouter.post("/cierres", async (req, res) => {
@@ -172,13 +226,26 @@ dbRouter.post("/cierres", async (req, res) => {
     return res.status(409).json({ success: false, error: "Ya existe un cierre registrado para esta fecha en este local." });
   }
 
-  const { data, error } = await supabaseAdmin.from("cierres_caja").insert(payload).select(CIERRE_SELECT).single();
+  let equipo;
+  try {
+    equipo = await resolverEquipo(req.body, payload.local_id as string, payload);
+  } catch (err) {
+    return fail(res, "POST /cierres", err);
+  }
+  if (equipo.error) return res.status(400).json({ success: false, error: equipo.error });
+
+  const { data, error } = await supabaseAdmin.from("cierres_caja").insert(payload).select("id").single();
   // 23505: otro envío simultáneo ganó la carrera (índice único local + fecha).
   if (error?.code === "23505") {
     return res.status(409).json({ success: false, error: "Ya existe un cierre registrado para esta fecha en este local." });
   }
   if (error) return fail(res, "POST /cierres", error);
-  res.json({ success: true, data });
+  try {
+    if (equipo.auxiliares) await guardarAuxiliares(data.id, equipo.auxiliares);
+    res.json({ success: true, data: await leerCierre(data.id) });
+  } catch (err) {
+    fail(res, "POST /cierres (auxiliares)", err);
+  }
 });
 
 dbRouter.put("/cierres/:id", async (req, res) => {
@@ -219,21 +286,38 @@ dbRouter.put("/cierres/:id", async (req, res) => {
     updates = pickColumns(req.body, DECLARED_COLUMNS);
   }
 
-  if (Object.keys(updates).length === 0) {
+  let equipo;
+  try {
+    equipo = await resolverEquipo(req.body, existing.local_id, updates);
+  } catch (err) {
+    return fail(res, "PUT /cierres/:id", err);
+  }
+  if (equipo.error) return res.status(400).json({ success: false, error: equipo.error });
+
+  if (Object.keys(updates).length === 0 && !equipo.auxiliares) {
     return res.status(400).json({ success: false, error: "No hay campos válidos para actualizar." });
   }
 
   // Actualización condicional: si el estado cambió entre la lectura y la escritura, no se pisa.
-  const { data, error } = await supabaseAdmin
+  // Sin columnas que cambiar se reescribe el mismo estado para conservar esa verificación.
+  const { data: updated, error } = await supabaseAdmin
     .from("cierres_caja")
-    .update(updates)
+    .update(Object.keys(updates).length > 0 ? updates : { estado: existing.estado })
     .eq("id", id)
     .eq("estado", existing.estado)
-    .select(CIERRE_SELECT)
+    .select("id")
     .maybeSingle();
   if (error) return fail(res, "PUT /cierres/:id", error);
-  if (!data) {
+  if (!updated) {
     return res.status(409).json({ success: false, error: "El cierre fue modificado por otra persona. Recarga e inténtalo de nuevo." });
+  }
+
+  let data;
+  try {
+    if (equipo.auxiliares) await guardarAuxiliares(id, equipo.auxiliares);
+    data = await leerCierre(id);
+  } catch (err) {
+    return fail(res, "PUT /cierres/:id (auxiliares)", err);
   }
 
   if (user.isGerencia && updates.estado && updates.estado !== existing.estado) {

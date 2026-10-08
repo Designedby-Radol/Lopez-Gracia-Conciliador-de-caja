@@ -52,7 +52,7 @@ async function resolveUserId(nameOrIdentifier?: string | null): Promise<string |
   return null;
 }
 
-function fromDbRow(row: any): CierreCaja {
+export function fromDbRow(row: any): CierreCaja {
   const colabName = row.colaborador?.nombre 
     ? getFriendlyName(row.colaborador.nombre) 
     : (getFriendlyName(row.colaboradorNombre) || "Colaborador");
@@ -60,6 +60,12 @@ function fromDbRow(row: any): CierreCaja {
   const auditorName = row.auditor?.nombre 
     ? getFriendlyName(row.auditor.nombre) 
     : (row.auditado_por && !isValidUUID(row.auditado_por) ? row.auditado_por : (getFriendlyName(row.auditado_por) || undefined));
+
+  // El servidor devuelve el líder (desde lider_id) y los auxiliares (tabla cierre_auxiliares).
+  const liderNombre = row.lider?.nombre ? getFriendlyName(row.lider.nombre) : undefined;
+  const auxiliaresNombres = Array.isArray(row.auxiliares)
+    ? row.auxiliares.map((a: any) => getFriendlyName(a?.nombre)).filter(Boolean)
+    : undefined;
 
   return {
     id: row.id,
@@ -94,6 +100,8 @@ function fromDbRow(row: any): CierreCaja {
     difTransferencias: row.dif_transferencias !== null && row.dif_transferencias !== undefined ? Number(row.dif_transferencias) : undefined,
     liderId: row.lider_id || undefined,
     lider_id: row.lider_id || undefined,
+    liderNombre,
+    auxiliaresNombres,
     descuadreLider: row.descuadre_lider !== null && row.descuadre_lider !== undefined ? Number(row.descuadre_lider) : undefined,
     descuadreAuxiliar: row.descuadre_auxiliar !== null && row.descuadre_auxiliar !== undefined ? Number(row.descuadre_auxiliar) : undefined,
     auditadoPor: auditorName,
@@ -105,7 +113,7 @@ function fromDbRow(row: any): CierreCaja {
   };
 }
 
-function toDbRow(cierre: any, localId: string) {
+export function toDbRow(cierre: any, localId: string) {
   const row: any = {
     fecha: cierre.fecha,
     local_id: localId,
@@ -133,10 +141,7 @@ function toDbRow(cierre: any, localId: string) {
   if (cierre.difRappi !== undefined) row.dif_rappi = cierre.difRappi;
   if (cierre.difTransferencias !== undefined) row.dif_transferencias = cierre.difTransferencias;
 
-  const rawLider = cierre.liderId || cierre.lider_id;
-  if (rawLider) {
-    row.lider_id = isValidUUID(rawLider) ? rawLider : null;
-  }
+  Object.assign(row, equipoPayload(cierre));
   if (cierre.descuadreLider !== undefined) row.descuadre_lider = cierre.descuadreLider;
   if (cierre.descuadreAuxiliar !== undefined) row.descuadre_auxiliar = cierre.descuadreAuxiliar;
 
@@ -152,6 +157,21 @@ function toDbRow(cierre: any, localId: string) {
   return row;
 }
 
+/**
+ * Líder y auxiliares del turno. El servidor resuelve los nombres a usuario_id contra
+ * el equipo del local del cierre y guarda los auxiliares en cierre_auxiliares.
+ */
+export function equipoPayload(cierre: Partial<CierreCaja>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const rawLider = cierre.liderId || cierre.lider_id;
+  if (isValidUUID(rawLider)) out.lider_id = rawLider;
+  else if (cierre.liderNombre?.trim()) out.lider_nombre = cierre.liderNombre.trim();
+  if (Array.isArray(cierre.auxiliaresNombres)) {
+    out.auxiliares_nombres = cierre.auxiliaresNombres.map((n) => String(n ?? "").trim()).filter(Boolean);
+  }
+  return out;
+}
+
 export const dbAdapter = {
   // ---- Cierres de caja ----
   async getCierres(localNameOrId: string = "Chapinero"): Promise<CierreCaja[]> {
@@ -163,15 +183,8 @@ export const dbAdapter = {
   async saveCierre(cierre: Omit<CierreCaja, "id" | "createdAt">, localNameOrId: string = "Chapinero"): Promise<CierreCaja> {
     const localId = await resolveLocalId(localNameOrId);
 
-    // El servidor asigna colaborador_id a partir de la sesión; aquí solo se resuelve el líder.
-    let resolvedLiderId = isValidUUID(cierre.liderId || cierre.lider_id)
-      ? (cierre.liderId || cierre.lider_id)
-      : null;
-    if (!resolvedLiderId && (cierre.liderNombre || cierre.liderId)) {
-      resolvedLiderId = await resolveUserId(cierre.liderNombre || cierre.liderId);
-    }
-
-    const dbPayload = toDbRow({ ...cierre, liderId: resolvedLiderId, lider_id: resolvedLiderId }, localId);
+    // El servidor asigna colaborador_id a partir de la sesión y resuelve líder y auxiliares.
+    const dbPayload = toDbRow(cierre, localId);
     const { data } = await api<{ data: any }>("/api/db/cierres", { method: "POST", json: dbPayload });
     return fromDbRow(data);
   },
@@ -207,11 +220,7 @@ export const dbAdapter = {
       if (resolvedUuid) rowUpdates.colaborador_id = resolvedUuid;
     }
 
-    if (updates.liderId !== undefined || updates.lider_id !== undefined || updates.liderNombre !== undefined) {
-      const rawLider = updates.liderId || updates.lider_id || updates.liderNombre;
-      const resolvedUuid = await resolveUserId(rawLider);
-      if (resolvedUuid) rowUpdates.lider_id = resolvedUuid;
-    }
+    Object.assign(rowUpdates, equipoPayload(updates));
     if (updates.descuadreLider !== undefined) rowUpdates.descuadre_lider = updates.descuadreLider;
     if (updates.descuadreAuxiliar !== undefined) rowUpdates.descuadre_auxiliar = updates.descuadreAuxiliar;
 
