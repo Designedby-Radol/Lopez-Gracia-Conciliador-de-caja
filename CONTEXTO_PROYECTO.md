@@ -83,7 +83,8 @@ El aplicativo implementa una arquitectura cliente-servidor moderna de alto rendi
      - Configuraciones individuales de nómina (`nomina_config`).
      - Historial y liquidaciones quincenales (`turnos_nomina`).
      - Parámetros macro de nómina (`configuracion_nomina`: SMMLV y Auxilio de Transporte).
-   - **Seguridad**: Autenticación centralizada mediante Supabase Auth para colaboradores y gerentes.
+   - **Seguridad**: El navegador no accede a Supabase. `server.ts` valida la sesión (cookie firmada) y el rol en cada ruta `/api`, y usa la `service_role` key. Contraseñas con hash scrypt en `credenciales`; auditoría en `audit_log`; RLS activo en todas las tablas.
+   - **Lógica de negocio con pruebas**: `src/lib/discrepancy.ts` (diferencias y 60/40), `src/lib/tips.ts` (propinas), `src/lib/payroll.ts` (jornada legal, recargo nocturno), `src/lib/dates.ts` (fechas en hora de Bogotá).
 
 4. **Integración con Inteligencia Artificial (Google Gemini)**:
    - Uso de la librería oficial `@google/genai` con el modelo de alta velocidad y razonamiento `gemini-3.6-flash`.
@@ -203,8 +204,8 @@ El módulo de salarios y el agente de IA aplican rigurosamente los parámetros d
 ### Flujo 1: Inicio de Sesión y Selección de Sede
 ```
 ┌──────────────┐     Selecciona Rol (Líder / Colaborador / Gerente)
-│  Login.tsx   │ ──► Ingresa Nombre y Sede (ej. Chapinero)
-└──────┬───────┘     Guarda sesión en localStorage
+│  Login.tsx   │ ──► Cédula/correo + contraseña (validadas en el servidor)
+└──────┬───────┘     Sesión firmada en cookie httpOnly (12 h); rol y local vienen del servidor
        │
        ├─────────────────────────────────┬─────────────────────────────────┐
        ▼                                 ▼                                 ▼
@@ -224,7 +225,7 @@ Operativo y Arqueo Diario         y Operación Diaria               Gerencial Co
    - Registro de novedades operativas (fallas de datáfono, producto no conforme, faltantes de inventario).
 3. **Cierre de Turno**:
    - Diligenciamiento del arqueo físico de caja: efectivo, vouchers de datáfono, cierres de Justo y Rappi, propinas en urna.
-   - Registro enviado a Firestore bajo el estado `Pendiente por Cuadrar`.
+   - Registro enviado al servidor bajo el estado `Pendiente por Cuadrar` (solo editable mientras siga pendiente).
 
 ---
 
