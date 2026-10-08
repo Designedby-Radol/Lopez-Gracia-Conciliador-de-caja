@@ -591,7 +591,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
             <div>
               <h2 className="text-xl font-black text-brand-ink flex items-center space-x-2">
                 <span>Perfiles de Empleados & Talento Humano</span>
-                <span className="px-2 py-0.5 bg-purple-100 text-purple-900 border border-purple-300 font-mono text-[10px] font-black rounded uppercase">
+                <span className="px-2 py-0.5 bg-purple-100 text-purple-900 border border-purple-300 font-mono text-[11px] font-black rounded uppercase">
                   RRHH & Bienestar
                 </span>
               </h2>
@@ -709,33 +709,33 @@ López & Gracia Talento Humano • Sistema Operativo`;
       {/* KPIS DE TALENTO HUMANO */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="bg-white border-2 border-brand-ink p-4 shadow-[3px_3px_0px_0px_#1C1917] rounded-xl">
-          <span className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Plantilla Total</span>
+          <span className="text-[11px] font-black uppercase text-zinc-500 tracking-wider block">Plantilla Total</span>
           <div className="flex items-baseline space-x-1.5 mt-1">
             <span className="text-2xl font-black text-brand-ink font-mono">{totalEmployees}</span>
             <span className="text-[11px] font-bold text-emerald-600">({activeEmployees} activos)</span>
           </div>
-          <span className="text-[10px] text-zinc-400 font-bold block mt-0.5">Sede {localName}</span>
+          <span className="text-[11px] text-zinc-400 font-bold block mt-0.5">Sede {localName}</span>
         </div>
 
         <div className="bg-white border-2 border-brand-ink p-4 shadow-[3px_3px_0px_0px_#1C1917] rounded-xl">
-          <span className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Jornada Semanal</span>
+          <span className="text-[11px] font-black uppercase text-zinc-500 tracking-wider block">Jornada Semanal</span>
           <div className="flex items-baseline space-x-1.5 mt-1">
             <span className="text-2xl font-black text-blue-900 font-mono">{employeesInRegulation42h} / {totalEmployees}</span>
-            <span className="text-[10px] font-black uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded">En Regla</span>
+            <span className="text-[11px] font-black uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded">En Regla</span>
           </div>
-          <span className="text-[10px] text-zinc-400 font-bold block mt-0.5">Máximo 42.0h semanales</span>
+          <span className="text-[11px] text-zinc-400 font-bold block mt-0.5">Máximo 42.0h semanales</span>
         </div>
 
         <div className="bg-white border-2 border-brand-ink p-4 shadow-[3px_3px_0px_0px_#1C1917] rounded-xl">
-          <span className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Bonificaciones Activas</span>
+          <span className="text-[11px] font-black uppercase text-zinc-500 tracking-wider block">Bonificaciones Activas</span>
           <div className="flex items-baseline space-x-1.5 mt-1">
             <span className="text-xl font-black text-purple-900 font-mono">{formatCOP(totalActiveBonuses)}</span>
           </div>
-          <span className="text-[10px] text-purple-700 font-bold block mt-0.5">Mensual consolidado</span>
+          <span className="text-[11px] text-purple-700 font-bold block mt-0.5">Mensual consolidado</span>
         </div>
 
         <div className="bg-white border-2 border-brand-ink p-4 shadow-[3px_3px_0px_0px_#1C1917] rounded-xl">
-          <span className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Distribución de Áreas</span>
+          <span className="text-[11px] font-black uppercase text-zinc-500 tracking-wider block">Distribución de Áreas</span>
           <div className="flex items-center space-x-2 mt-1.5 text-xs font-bold font-mono">
             <span className="px-2 py-0.5 bg-blue-50 text-blue-900 border border-blue-200 rounded">
               Ventas: {teamMembers.filter(m => getEmployeeData(m).area === "Ventas").length}
@@ -762,7 +762,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
 
         <div className="flex items-center space-x-2 w-full sm:w-auto justify-end flex-wrap">
           <div className="flex items-center space-x-1 text-xs">
-            <span className="text-[10px] font-black uppercase text-zinc-500">Área:</span>
+            <span className="text-[11px] font-black uppercase text-zinc-500">Área:</span>
             <select
               value={areaFilter}
               onChange={(e: any) => setAreaFilter(e.target.value)}
@@ -775,7 +775,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
           </div>
 
           <div className="flex items-center space-x-1 text-xs">
-            <span className="text-[10px] font-black uppercase text-zinc-500">Estado:</span>
+            <span className="text-[11px] font-black uppercase text-zinc-500">Estado:</span>
             <select
               value={statusFilter}
               onChange={(e: any) => setStatusFilter(e.target.value)}
@@ -796,7 +796,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
             <Briefcase className="w-4 h-4 text-brand-ink" />
             <span>Fichero de Colaboradores Registrados ({filteredMembers.length})</span>
           </h3>
-          <span className="text-[10px] text-zinc-500 font-bold">
+          <span className="text-[11px] text-zinc-500 font-bold">
             Haz clic en "Ficha RRHH" para gestionar bonos, sanciones, turnos y reportes.
           </span>
         </div>
@@ -804,7 +804,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-zinc-100 border-b border-zinc-300 text-[10px] font-black uppercase text-zinc-600 tracking-wider">
+              <tr className="bg-zinc-100 border-b border-zinc-300 text-[11px] font-black uppercase text-zinc-600 tracking-wider">
                 <th className="py-3 px-4">Colaborador</th>
                 <th className="py-3 px-3">Cargo & Área</th>
                 <th className="py-3 px-3">Contrato & Sueldo</th>
@@ -842,7 +842,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                             <span className="font-black text-brand-ink block text-sm">
                               {member.nombre}
                             </span>
-                            <div className="flex items-center gap-2 mt-0.5 text-[10px] font-mono text-zinc-500">
+                            <div className="flex items-center gap-2 mt-0.5 text-[11px] font-mono text-zinc-500">
                               <span>C.C. {cfg.cedula || member.cedula || "N/A"}</span>
                               {hr.telefono && <span>• Tel: {hr.telefono}</span>}
                             </div>
@@ -852,7 +852,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
 
                       <td className="py-3 px-3">
                         <span className="font-bold text-brand-ink block">{cfg.role}</span>
-                        <span className={`inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded border mt-0.5 ${
+                        <span className={`inline-block text-[11px] font-black uppercase px-2 py-0.5 rounded border mt-0.5 ${
                           cfg.area === "Pastelería" 
                             ? "bg-amber-50 text-amber-900 border-amber-200" 
                             : "bg-blue-50 text-blue-900 border-blue-200"
@@ -865,7 +865,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                         <span className="font-black font-mono text-brand-ink block">
                           {formatCOP(cfg.salarioBaseMensual)}
                         </span>
-                        <div className="flex items-center space-x-1 text-[9px] font-bold text-zinc-500 mt-0.5">
+                        <div className="flex items-center space-x-1 text-[11px] font-bold text-zinc-500 mt-0.5">
                           <span>{cfg.tipoContrato || "Indefinido"}</span>
                           <span>•</span>
                           <span className={cfg.auxilioTransporteAplica ? "text-emerald-700" : "text-zinc-400"}>
@@ -880,11 +880,11 @@ López & Gracia Talento Humano • Sistema Operativo`;
                         </span>
                         <div className="mt-1">
                           {weeklyHours <= 42 ? (
-                            <span className="text-[8px] font-black uppercase text-emerald-800 bg-emerald-100 border border-emerald-300 px-1.5 py-0.2 rounded">
+                            <span className="text-[11px] font-black uppercase text-emerald-800 bg-emerald-100 border border-emerald-300 px-1.5 py-0.2 rounded">
                               En regla
                             </span>
                           ) : (
-                            <span className="text-[8px] font-black uppercase text-red-800 bg-red-100 border border-red-300 px-1.5 py-0.2 rounded">
+                            <span className="text-[11px] font-black uppercase text-red-800 bg-red-100 border border-red-300 px-1.5 py-0.2 rounded">
                               Exceso +{(weeklyHours - 42).toFixed(1)}h
                             </span>
                           )}
@@ -893,21 +893,21 @@ López & Gracia Talento Humano • Sistema Operativo`;
 
                       <td className="py-3 px-3 text-center">
                         {bonosCount > 0 ? (
-                          <span className="px-2.5 py-1 bg-purple-100 text-purple-900 border border-purple-300 text-[10px] font-black rounded-lg">
+                          <span className="px-2.5 py-1 bg-purple-100 text-purple-900 border border-purple-300 text-[11px] font-black rounded-lg">
                             {bonosCount} bono{bonosCount > 1 ? "s" : ""}
                           </span>
                         ) : (
-                          <span className="text-[10px] font-bold text-zinc-400">Sin bonos</span>
+                          <span className="text-[11px] font-bold text-zinc-400">Sin bonos</span>
                         )}
                       </td>
 
                       <td className="py-3 px-3 text-center">
                         {sancionesCount > 0 ? (
-                          <span className="px-2 py-0.5 bg-red-100 text-red-900 border border-red-300 text-[10px] font-black rounded-lg">
+                          <span className="px-2 py-0.5 bg-red-100 text-red-900 border border-red-300 text-[11px] font-black rounded-lg">
                             {sancionesCount} sanción{sancionesCount > 1 ? "es" : ""}
                           </span>
                         ) : (
-                          <span className="text-[10px] font-bold text-emerald-600">Limpio (0)</span>
+                          <span className="text-[11px] font-bold text-emerald-600">Limpio (0)</span>
                         )}
                       </td>
 
@@ -915,7 +915,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                         <span className="text-xs font-black text-blue-900">
                           {vacInfo.diasCausados}d
                         </span>
-                        <span className="text-[9px] text-zinc-400 block font-sans">causados</span>
+                        <span className="text-[11px] text-zinc-400 block font-sans">causados</span>
                       </td>
 
                       <td className="py-3 px-4 text-right">
@@ -926,7 +926,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                               setSelectedEmployee(member);
                               setActiveHrTab("reports");
                             }}
-                            className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 text-[10px] font-black uppercase rounded-lg transition-all flex items-center space-x-1 cursor-pointer"
+                            className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 text-[11px] font-black uppercase rounded-lg transition-all flex items-center space-x-1 cursor-pointer"
                             title="Generar y mandar reporte"
                           >
                             <FileText className="w-3 h-3" />
@@ -939,7 +939,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                               setSelectedEmployee(member);
                               setActiveHrTab("contract");
                             }}
-                            className="px-3 py-1 bg-brand-ink hover:bg-black text-white text-[10px] font-black uppercase rounded-lg transition-all flex items-center space-x-1 cursor-pointer shadow-xs"
+                            className="px-3 py-1 bg-brand-ink hover:bg-black text-white text-[11px] font-black uppercase rounded-lg transition-all flex items-center space-x-1 cursor-pointer shadow-xs"
                             title="Abrir Legajo y Ficha Completa de RRHH"
                           >
                             <Sliders className="w-3 h-3" />
@@ -974,7 +974,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                 <div>
                   <h3 className="font-black text-base flex items-center space-x-2">
                     <span>Ficha Laboral & RRHH: {selectedEmployee.nombre}</span>
-                    <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded font-mono font-bold">
+                    <span className="text-[11px] bg-white/20 px-2 py-0.5 rounded font-mono font-bold">
                       C.C. {getEmployeeData(selectedEmployee).cedula || selectedEmployee.cedula || "N/A"}
                     </span>
                   </h3>
@@ -1094,7 +1094,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               Cédula de Ciudadanía
                             </label>
                             <input
@@ -1106,7 +1106,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               Salario Base Mensual (COP)
                             </label>
                             <div className="flex space-x-1">
@@ -1119,19 +1119,19 @@ López & Gracia Talento Humano • Sistema Operativo`;
                               <button
                                 type="button"
                                 onClick={() => handleSaveEmployeeUpdates(selectedEmployee.nombre, { salarioBaseMensual: smmlvBase })}
-                                className="px-2.5 bg-zinc-200 hover:bg-zinc-300 text-[10px] font-black uppercase rounded-lg shrink-0 cursor-pointer"
+                                className="px-2.5 bg-zinc-200 hover:bg-zinc-300 text-[11px] font-black uppercase rounded-lg shrink-0 cursor-pointer"
                                 title="Asignar SMMLV vigente"
                               >
                                 SMMLV
                               </button>
                             </div>
-                            <span className="text-[10px] text-zinc-500 font-bold block mt-1">
+                            <span className="text-[11px] text-zinc-500 font-bold block mt-1">
                               {formatCOP(cfg.salarioBaseMensual)} COP / mes
                             </span>
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               Tipo de Contrato
                             </label>
                             <select
@@ -1147,7 +1147,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               Área / Sección
                             </label>
                             <select
@@ -1161,7 +1161,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               Fecha de Ingreso (Antigüedad)
                             </label>
                             <input
@@ -1172,13 +1172,13 @@ López & Gracia Talento Humano • Sistema Operativo`;
                               })}
                               className="w-full bg-white border border-zinc-300 p-2 font-bold rounded-lg outline-none"
                             />
-                            <span className="text-[10px] text-zinc-500 block mt-0.5">
+                            <span className="text-[11px] text-zinc-500 block mt-0.5">
                               {vacInfo.antiguedadAnios} años, {vacInfo.antiguedadMeses} meses
                             </span>
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               Auxilio de Transporte
                             </label>
                             <div className="flex items-center space-x-2 pt-2">
@@ -1205,7 +1205,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
 
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               EPS Afiliada
                             </label>
                             <input
@@ -1220,7 +1220,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               ARL (Riesgo Laboral)
                             </label>
                             <input
@@ -1235,7 +1235,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               Fondo de Pensiones
                             </label>
                             <input
@@ -1250,7 +1250,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               Fondo de Cesantías
                             </label>
                             <input
@@ -1265,7 +1265,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               Teléfono / WhatsApp
                             </label>
                             <input
@@ -1280,7 +1280,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               Correo Electrónico
                             </label>
                             <input
@@ -1295,7 +1295,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               Contacto de Emergencia
                             </label>
                             <input
@@ -1310,7 +1310,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                               Tel. Contacto de Emergencia
                             </label>
                             <input
@@ -1328,7 +1328,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
 
                       {/* INFORMACIÓN PARTICULAR / ANOTACIONES */}
                       <div className="bg-zinc-50 border border-zinc-200 p-4 rounded-xl space-y-2">
-                        <label className="text-[10px] font-black uppercase text-zinc-700 tracking-wider block">
+                        <label className="text-[11px] font-black uppercase text-zinc-700 tracking-wider block">
                           Anotaciones & Observaciones Contractuales
                         </label>
                         <textarea
@@ -1363,11 +1363,11 @@ López & Gracia Talento Humano • Sistema Operativo`;
                             Carga Total: <strong className="font-mono text-sm">{weeklyHours.toFixed(1)} hrs</strong> / 42h
                           </span>
                           {weeklyHours <= 42 ? (
-                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-black rounded-lg">
+                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] font-black rounded-lg">
                               En regla
                             </span>
                           ) : (
-                            <span className="px-2 py-0.5 bg-red-100 text-red-900 border border-red-300 text-[10px] font-black rounded-lg">
+                            <span className="px-2 py-0.5 bg-red-100 text-red-900 border border-red-300 text-[11px] font-black rounded-lg">
                               Exceso +{(weeklyHours - 42).toFixed(1)}h
                             </span>
                           )}
@@ -1376,32 +1376,32 @@ López & Gracia Talento Humano • Sistema Operativo`;
 
                       {/* BOTONES DE PLANTILLAS RÁPIDAS DE TURNOS */}
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[10px] font-black uppercase text-zinc-500">Plantillas de Turno:</span>
+                        <span className="text-[11px] font-black uppercase text-zinc-500">Plantillas de Turno:</span>
                         <button
                           type="button"
                           onClick={() => handleApplyShiftTemplate("apertura_ventas")}
-                          className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 text-brand-ink border border-zinc-300 rounded text-[10px] font-bold cursor-pointer"
+                          className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 text-brand-ink border border-zinc-300 rounded text-[11px] font-bold cursor-pointer"
                         >
                           Apertura Ventas (07:30 - 15:00)
                         </button>
                         <button
                           type="button"
                           onClick={() => handleApplyShiftTemplate("cierre_ventas")}
-                          className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 text-brand-ink border border-zinc-300 rounded text-[10px] font-bold cursor-pointer"
+                          className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 text-brand-ink border border-zinc-300 rounded text-[11px] font-bold cursor-pointer"
                         >
                           Cierre Ventas (12:30 - 20:00)
                         </button>
                         <button
                           type="button"
                           onClick={() => handleApplyShiftTemplate("pasteleria_produccion")}
-                          className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 text-brand-ink border border-zinc-300 rounded text-[10px] font-bold cursor-pointer"
+                          className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 text-brand-ink border border-zinc-300 rounded text-[11px] font-bold cursor-pointer"
                         >
                           Pastelería (06:00 - 13:30)
                         </button>
                         <button
                           type="button"
                           onClick={() => handleApplyShiftTemplate("partido_completo")}
-                          className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 text-brand-ink border border-zinc-300 rounded text-[10px] font-bold cursor-pointer"
+                          className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 text-brand-ink border border-zinc-300 rounded text-[11px] font-bold cursor-pointer"
                         >
                           Turno Completo (10:00 - 18:00)
                         </button>
@@ -1411,7 +1411,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                       <div className="overflow-x-auto bg-white rounded-xl border border-zinc-300">
                         <table className="w-full text-left border-collapse text-xs">
                           <thead>
-                            <tr className="bg-zinc-100 border-b border-zinc-300 text-[10px] font-black text-zinc-600 uppercase">
+                            <tr className="bg-zinc-100 border-b border-zinc-300 text-[11px] font-black text-zinc-600 uppercase">
                               <th className="p-2.5">Día de Semana</th>
                               <th className="p-2.5 text-center">Labora</th>
                               <th className="p-2.5">Hora Entrada</th>
@@ -1428,7 +1428,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                                   <td className="p-2.5 font-bold text-brand-ink flex items-center space-x-1.5">
                                     <span>{day.dia}</span>
                                     {isRestDay && (
-                                      <span className="text-[8px] bg-amber-200 text-amber-900 font-black px-1.5 py-0.2 rounded">
+                                      <span className="text-[11px] bg-amber-200 text-amber-900 font-black px-1.5 py-0.2 rounded">
                                         Descanso
                                       </span>
                                     )}
@@ -1521,7 +1521,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           <h5 className="text-xs font-black uppercase text-purple-950">Nueva Bonificación</h5>
                           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
                             <div>
-                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Concepto</label>
+                              <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Concepto</label>
                               <input
                                 type="text"
                                 required
@@ -1533,7 +1533,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                             </div>
 
                             <div>
-                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Monto (COP)</label>
+                              <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Monto (COP)</label>
                               <input
                                 type="number"
                                 required
@@ -1544,7 +1544,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                             </div>
 
                             <div>
-                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Tipología Legal</label>
+                              <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Tipología Legal</label>
                               <select
                                 value={newBonusType}
                                 onChange={(e: any) => setNewBonusType(e.target.value)}
@@ -1556,7 +1556,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                             </div>
 
                             <div>
-                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Frecuencia Pago</label>
+                              <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Frecuencia Pago</label>
                               <select
                                 value={newBonusPayment}
                                 onChange={(e: any) => setNewBonusPayment(e.target.value)}
@@ -1570,7 +1570,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Motivo / Justificación</label>
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Motivo / Justificación</label>
                             <input
                               type="text"
                               placeholder="Ej. Reconocimiento por apoyo extraordinario en producción de temporada"
@@ -1614,7 +1614,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                                     <span className="font-mono font-black text-purple-900 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded">
                                       {formatCOP(b.monto)} COP
                                     </span>
-                                    <span className="text-[9px] font-black uppercase bg-zinc-100 text-zinc-700 px-2 py-0.5 rounded">
+                                    <span className="text-[11px] font-black uppercase bg-zinc-100 text-zinc-700 px-2 py-0.5 rounded">
                                       {b.tipologia}
                                     </span>
                                   </div>
@@ -1676,7 +1676,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           <h5 className="text-xs font-black uppercase text-red-950">Nuevo Llamado de Atención / Memorando</h5>
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                             <div>
-                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Tipo de Medida</label>
+                              <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Tipo de Medida</label>
                               <select
                                 value={newSanctionType}
                                 onChange={(e: any) => setNewSanctionType(e.target.value)}
@@ -1690,7 +1690,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                             </div>
 
                             <div>
-                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Gravedad de la Falta</label>
+                              <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Gravedad de la Falta</label>
                               <select
                                 value={newSanctionSeverity}
                                 onChange={(e: any) => setNewSanctionSeverity(e.target.value)}
@@ -1703,7 +1703,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                             </div>
 
                             <div>
-                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Motivo Principal</label>
+                              <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Motivo Principal</label>
                               <input
                                 type="text"
                                 required
@@ -1717,7 +1717,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
 
                           {newSanctionType === "Suspensión Disciplinaria" && (
                             <div>
-                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Días de Suspensión sin Sueldo</label>
+                              <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Días de Suspensión sin Sueldo</label>
                               <input
                                 type="number"
                                 min={1}
@@ -1730,7 +1730,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           )}
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Descripción de los Hechos</label>
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Descripción de los Hechos</label>
                             <textarea
                               rows={2}
                               required
@@ -1742,7 +1742,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Compromiso Adquirido por el Empleado</label>
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Compromiso Adquirido por el Empleado</label>
                             <input
                               type="text"
                               placeholder="Ej. El colaborador se compromete a reportar previamente cualquier eventualidad..."
@@ -1783,7 +1783,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center space-x-2">
                                   <span className="font-black text-red-900 text-sm">{s.tipo}</span>
-                                  <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
+                                  <span className={`px-2 py-0.5 rounded text-[11px] font-black uppercase ${
                                     s.gravedad === "Grave" ? "bg-red-600 text-white" : s.gravedad === "Moderada" ? "bg-amber-100 text-amber-900" : "bg-zinc-100 text-zinc-700"
                                   }`}>
                                     {s.gravedad}
@@ -1839,31 +1839,31 @@ López & Gracia Talento Humano • Sistema Operativo`;
                       {/* BALANCES DE VACACIONES SEGÚN CST */}
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="bg-blue-50 border border-blue-200 p-3.5 rounded-xl">
-                          <span className="text-[10px] font-black uppercase text-blue-800 block">Días Causados por Ley</span>
+                          <span className="text-[11px] font-black uppercase text-blue-800 block">Días Causados por Ley</span>
                           <span className="text-2xl font-black text-blue-950 font-mono mt-1 block">
                             {vacInfo.diasCausados} días
                           </span>
-                          <span className="text-[10px] text-blue-700 font-bold block mt-0.5">
+                          <span className="text-[11px] text-blue-700 font-bold block mt-0.5">
                             {vacInfo.diasLaborados} días laborados desde {hr.fechaIngreso || "ingreso"}
                           </span>
                         </div>
 
                         <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-xl">
-                          <span className="text-[10px] font-black uppercase text-amber-800 block">Días Disfrutados / Compensados</span>
+                          <span className="text-[11px] font-black uppercase text-amber-800 block">Días Disfrutados / Compensados</span>
                           <span className="text-2xl font-black text-amber-950 font-mono mt-1 block">
                             {disfrutados} días
                           </span>
-                          <span className="text-[10px] text-amber-700 font-bold block mt-0.5">
+                          <span className="text-[11px] text-amber-700 font-bold block mt-0.5">
                             Registrados formalmente
                           </span>
                         </div>
 
                         <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-xl">
-                          <span className="text-[10px] font-black uppercase text-emerald-800 block">Días Pendientes de Disfrute</span>
+                          <span className="text-[11px] font-black uppercase text-emerald-800 block">Días Pendientes de Disfrute</span>
                           <span className="text-2xl font-black text-emerald-950 font-mono mt-1 block">
                             {pendientes.toFixed(1)} días
                           </span>
-                          <span className="text-[10px] text-emerald-700 font-bold block mt-0.5">
+                          <span className="text-[11px] text-emerald-700 font-bold block mt-0.5">
                             Saldo a favor del colaborador
                           </span>
                         </div>
@@ -1887,7 +1887,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           <h5 className="font-black uppercase text-brand-ink">Registrar Novedad de Tiempo / Vacaciones</h5>
                           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                             <div>
-                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Tipo de Novedad</label>
+                              <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Tipo de Novedad</label>
                               <select
                                 value={newVacationType}
                                 onChange={(e: any) => setNewVacationType(e.target.value)}
@@ -1903,7 +1903,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                             </div>
 
                             <div>
-                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Fecha Inicio</label>
+                              <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Fecha Inicio</label>
                               <input
                                 type="date"
                                 required
@@ -1914,7 +1914,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                             </div>
 
                             <div>
-                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Fecha Fin</label>
+                              <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Fecha Fin</label>
                               <input
                                 type="date"
                                 required
@@ -1925,7 +1925,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                             </div>
 
                             <div>
-                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Días Hábiles</label>
+                              <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Días Hábiles</label>
                               <input
                                 type="number"
                                 min={1}
@@ -1938,7 +1938,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Observaciones / Radicado EPS</label>
+                            <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Observaciones / Radicado EPS</label>
                             <input
                               type="text"
                               placeholder="Ej. Periodo 2024-2025 o No. de incapacidad EPS Sanitas..."
@@ -1978,10 +1978,10 @@ López & Gracia Talento Humano • Sistema Operativo`;
                               <div>
                                 <div className="flex items-center space-x-2">
                                   <span className="font-black text-brand-ink">{v.tipo}</span>
-                                  <span className="font-mono font-bold bg-zinc-100 px-2 py-0.5 rounded text-[10px]">
+                                  <span className="font-mono font-bold bg-zinc-100 px-2 py-0.5 rounded text-[11px]">
                                     {v.diasHabiles} días hábiles
                                   </span>
-                                  <span className="text-[9px] font-black uppercase bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">
+                                  <span className="text-[11px] font-black uppercase bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">
                                     {v.estado}
                                   </span>
                                 </div>
@@ -2027,7 +2027,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                         </div>
 
                         <div className="flex items-center space-x-2">
-                          <label className="text-[10px] font-black uppercase text-blue-900">Tipo de Documento:</label>
+                          <label className="text-[11px] font-black uppercase text-blue-900">Tipo de Documento:</label>
                           <select
                             value={selectedReportType}
                             onChange={(e: any) => setSelectedReportType(e.target.value)}
@@ -2122,7 +2122,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
             <form onSubmit={handleCreateNewMember} className="p-5 space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Nombre Completo</label>
+                  <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Nombre Completo</label>
                   <input
                     type="text"
                     required
@@ -2134,7 +2134,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Cédula de Ciudadanía</label>
+                  <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Cédula de Ciudadanía</label>
                   <input
                     type="text"
                     required
@@ -2146,7 +2146,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Cargo Laboral</label>
+                  <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Cargo Laboral</label>
                   <select
                     value={newMemberRole}
                     onChange={(e) => {
@@ -2169,7 +2169,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Área</label>
+                  <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Área</label>
                   <select
                     value={newMemberArea}
                     onChange={(e: any) => setNewMemberArea(e.target.value)}
@@ -2181,7 +2181,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Salario Base Mensual</label>
+                  <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Salario Base Mensual</label>
                   <input
                     type="number"
                     value={newMemberSalario}
@@ -2191,7 +2191,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Tipo de Contrato</label>
+                  <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Tipo de Contrato</label>
                   <select
                     value={newMemberTipoContrato}
                     onChange={(e: any) => setNewMemberTipoContrato(e.target.value)}
@@ -2205,7 +2205,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Teléfono / WhatsApp</label>
+                  <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Teléfono / WhatsApp</label>
                   <input
                     type="text"
                     placeholder="3101234567"
@@ -2216,7 +2216,7 @@ López & Gracia Talento Humano • Sistema Operativo`;
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">Fecha de Ingreso</label>
+                  <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">Fecha de Ingreso</label>
                   <input
                     type="date"
                     value={newMemberFechaIngreso}

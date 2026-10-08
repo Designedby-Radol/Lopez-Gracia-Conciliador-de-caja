@@ -1,10 +1,12 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import Login from "./components/Login";
-import CollaboratorInflow from "./components/CollaboratorInflow";
-import ManagerDashboard from "./components/ManagerDashboard";
-import ForcePasswordChange from "./components/ForcePasswordChange";
 import { UserRole } from "./types";
 import { api, SESSION_EXPIRED_EVENT } from "./lib/api";
+
+// Cada rol descarga solo su pantalla (el dashboard de Gerencia es el más pesado).
+const CollaboratorInflow = lazy(() => import("./components/CollaboratorInflow"));
+const ManagerDashboard = lazy(() => import("./components/ManagerDashboard"));
+const ForcePasswordChange = lazy(() => import("./components/ForcePasswordChange"));
 
 export interface SessionInfo {
   id: string;
@@ -51,6 +53,7 @@ export default function App() {
     <div className="font-sans min-h-screen bg-brand-bg text-brand-ink">
       {session === null && <Login onLoginSuccess={setSession} />}
 
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-sm font-bold text-zinc-500" aria-busy="true">Cargando…</div>}>
       {session?.mustChangePassword && (
         <ForcePasswordChange user={session} onChanged={setSession} onLogout={handleLogout} />
       )}
@@ -62,6 +65,7 @@ export default function App() {
       {session && !session.mustChangePassword && session.isGerencia && (
         <ManagerDashboard onLogout={handleLogout} username={session.nombre} local={session.local} />
       )}
+      </Suspense>
     </div>
   );
 }

@@ -14,12 +14,9 @@ import {
   RotateCcw 
 } from "lucide-react";
 import { CierreCaja, POSReportTemplate } from "../types";
-import * as pdfjsLib from "pdfjs-dist";
-// @ts-ignore
-import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { loadPdfjs } from "../lib/lazyLibs";
 
 // Configurar el worker de PDF.js usando el worker empaquetado por Vite
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 interface PDFUploaderProps {
   cierre: CierreCaja;
@@ -358,7 +355,7 @@ export default function PDFUploader({
           const arrayBuffer = e.target?.result as ArrayBuffer;
           if (!arrayBuffer) throw new Error("No se pudo leer el archivo");
 
-          const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+          const loadingTask = (await loadPdfjs()).getDocument({ data: arrayBuffer });
           const pdf = await loadingTask.promise;
           let extractedText = "";
 
@@ -460,7 +457,7 @@ export default function PDFUploader({
                 <span className="text-xs font-mono font-bold text-emerald-900 truncate max-w-[220px]">
                   {currentPOSData.fileName}
                 </span>
-                <span className="text-[10px] bg-emerald-200/80 text-emerald-950 font-black px-1.5 py-0.2 rounded uppercase">
+                <span className="text-[11px] bg-emerald-200/80 text-emerald-950 font-black px-1.5 py-0.2 rounded uppercase">
                   Automático
                 </span>
               </div>
@@ -547,7 +544,7 @@ export default function PDFUploader({
               <span className="text-xs font-black text-brand-ink uppercase tracking-wider">
                 Arrastra o selecciona el reporte POS
               </span>
-              <span className="text-[9px] bg-zinc-200 text-zinc-700 px-1.5 py-0.2 rounded font-bold uppercase">
+              <span className="text-[11px] bg-zinc-200 text-zinc-700 px-1.5 py-0.2 rounded font-bold uppercase">
                 Opcional
               </span>
             </div>
@@ -583,7 +580,7 @@ export default function PDFUploader({
           {showTools ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </button>
 
-        <span className="text-[10px] text-brand-ink/40 font-medium italic">
+        <span className="text-[11px] text-brand-ink/40 font-medium italic">
           Si no subes archivo, puedes ingresar o auditar los valores directamente abajo
         </span>
       </div>
@@ -612,10 +609,10 @@ export default function PDFUploader({
                     </span>
                     <FileCheck2 className="w-3 h-3 text-zinc-400 group-hover:text-emerald-600 shrink-0" />
                   </div>
-                  <p className="text-[10px] text-zinc-500 line-clamp-2 leading-tight">
+                  <p className="text-[11px] text-zinc-500 line-clamp-2 leading-tight">
                     {tpl.description}
                   </p>
-                  <div className="mt-1.5 pt-1 border-t border-zinc-200/60 flex justify-between text-[9px] font-mono text-zinc-600">
+                  <div className="mt-1.5 pt-1 border-t border-zinc-200/60 flex justify-between text-[11px] font-mono text-zinc-600">
                     <span>Total: {formatCOP(tpl.efectivoPOS + tpl.tarjetasPOS + tpl.justoPOS + tpl.rappiPOS + tpl.transferenciasPOS)}</span>
                   </div>
                 </button>
@@ -627,7 +624,7 @@ export default function PDFUploader({
           <div className="pt-3 border-t border-zinc-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
             <div>
               <p className="font-bold text-brand-ink text-[11px]">¿Necesitas un archivo físico de prueba para ensayar la subida?</p>
-              <p className="text-[10px] text-zinc-500">Descarga un reporte TXT pre-formateado con las cifras de este cierre para probar la lectura.</p>
+              <p className="text-[11px] text-zinc-500">Descarga un reporte TXT pre-formateado con las cifras de este cierre para probar la lectura.</p>
             </div>
             <button
               type="button"
@@ -663,7 +660,7 @@ SIN NOVEDADES REVERSADAS:  $ 0
                 link.click();
                 URL.revokeObjectURL(url);
               }}
-              className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 border border-zinc-300 rounded font-black text-[10px] uppercase tracking-wider text-brand-ink flex items-center space-x-1.5 cursor-pointer shrink-0 transition-colors"
+              className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 border border-zinc-300 rounded font-black text-[11px] uppercase tracking-wider text-brand-ink flex items-center space-x-1.5 cursor-pointer shrink-0 transition-colors"
             >
               <Download className="w-3.5 h-3.5 text-brand-ink" />
               <span>Descargar Archivo TXT de Prueba</span>

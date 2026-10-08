@@ -56,10 +56,6 @@ import {
   Coffee,
   Check
 } from "lucide-react";
-import { jsPDF } from "jspdf";
-import * as pdfjsLib from "pdfjs-dist";
-// @ts-ignore
-import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { dbAdapter, resolveLocalId } from "../db/dbAdapter";
 import { CierreCaja, UserRole } from "../types";
 import Logo from "./Logo";
@@ -84,8 +80,8 @@ import { repartirPropinas, repartirPropinasEquitativo } from "../lib/tips";
 import { calcularDiferencias,faltanteCobrable, repartirDescuadre, resolverPosCanales, canalesSinValidar } from "../lib/discrepancy";
 import { EmployeeProfilesManager } from "./EmployeeProfilesManager";
 import { todayBogota, addDaysIso } from "../lib/dates";
+import { loadPdfjs, loadJsPDF } from "../lib/lazyLibs";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 export const ROLE_POINTS_MAP: Record<string, number> = {
   "Lider de punto": 2.0,
@@ -489,7 +485,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     try {
       const arrayBuffer = await file.arrayBuffer();
       // Usando pdfjsLib cargado
-      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const loadingTask = (await loadPdfjs()).getDocument({ data: arrayBuffer });
       const pdf = await loadingTask.promise;
       let fullText = "";
       
@@ -1257,19 +1253,19 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
   const getDiferenciaBadge = (dif: number) => {
     if (dif === 0) {
       return (
-        <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-black bg-emerald-50 text-brand-success border border-brand-success uppercase tracking-wider">
+        <span className="inline-flex items-center px-2 py-0.5 text-[11px] font-black bg-emerald-50 text-brand-success border border-brand-success uppercase tracking-wider">
           Cuadrado
         </span>
       );
     } else if (dif > 0) {
       return (
-        <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-black bg-blue-50 text-brand-info border border-brand-info uppercase tracking-wider">
+        <span className="inline-flex items-center px-2 py-0.5 text-[11px] font-black bg-blue-50 text-brand-info border border-brand-info uppercase tracking-wider">
           Sobra {formatCOP(dif)}
         </span>
       );
     } else {
       return (
-        <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-black bg-red-50 text-brand-danger border border-brand-danger uppercase tracking-wider">
+        <span className="inline-flex items-center px-2 py-0.5 text-[11px] font-black bg-red-50 text-brand-danger border border-brand-danger uppercase tracking-wider">
           Falta {formatCOP(Math.abs(dif))}
         </span>
       );
@@ -1299,7 +1295,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
   };
 
   // Generación y exportación de PDF para cada uno de los cierres filtrados (4 por página)
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (squaredCierres.length === 0) return;
 
     // Limpiar caracteres especiales incompatibles con la fuente estándar de jsPDF
@@ -1313,7 +1309,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     };
 
     try {
-      const doc = new jsPDF({
+      const doc = new (await loadJsPDF())({
         orientation: "portrait",
         unit: "mm",
         format: "a4",
@@ -1555,9 +1551,9 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     }
   };
 
-  const handleExportPropinasPDF = (selectedCierres: CierreCaja[], results: any[], totalPeriodTips: number) => {
+  const handleExportPropinasPDF = async (selectedCierres: CierreCaja[], results: any[], totalPeriodTips: number) => {
     try {
-      const doc = new jsPDF({
+      const doc = new (await loadJsPDF())({
         orientation: "portrait",
         unit: "mm",
         format: "a4",
@@ -1754,7 +1750,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
             </div>
             <div>
               <div className="text-sm font-black tracking-tight text-[#1C2E24] leading-none">López & Gracia</div>
-              <div className="text-[10px] font-bold text-[#1C2E24]/50 tracking-wider uppercase mt-1 flex items-center space-x-1.5">
+              <div className="text-[11px] font-bold text-[#1C2E24]/50 tracking-wider uppercase mt-1 flex items-center space-x-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 <span>Chapinero POS</span>
               </div>
@@ -1766,7 +1762,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
         <div className="flex-1 px-3 py-4 space-y-6 overflow-y-auto">
           {/* Section: GENERAL */}
           <div className="space-y-1">
-            <div className="px-3 text-[10px] font-black uppercase tracking-[0.14em] text-[#1C2E24]/40 mb-2">
+            <div className="px-3 text-[11px] font-black uppercase tracking-[0.14em] text-[#1C2E24]/40 mb-2">
               General
             </div>
             
@@ -1798,7 +1794,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                 <TrendingUp className={`w-4 h-4 ${activeTab === "indicadores" ? "text-white" : "text-[#1C2E24]/60"}`} />
                 <span>Indicadores</span>
               </div>
-              <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md ${
+              <span className={`text-[11px] font-black uppercase px-2 py-0.5 rounded-md ${
                 activeTab === "indicadores" 
                   ? "bg-white/20 text-white" 
                   : "bg-emerald-100 text-emerald-800"
@@ -1824,7 +1820,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                 <span>Auditoría Cierres</span>
               </div>
               {pendingCierres.length > 0 && (
-                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                <span className={`text-[11px] font-black px-2 py-0.5 rounded-full ${
                   activeTab === "audit"
                     ? "bg-[#FF5C35] text-white" 
                     : "bg-[#FF5C35]/15 text-[#FF5C35]"
@@ -1852,7 +1848,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
           {/* Section: HERRAMIENTAS */}
           <div className="space-y-1">
-            <div className="px-3 text-[10px] font-black uppercase tracking-[0.14em] text-[#1C2E24]/40 mb-2">
+            <div className="px-3 text-[11px] font-black uppercase tracking-[0.14em] text-[#1C2E24]/40 mb-2">
               Herramientas
             </div>
 
@@ -1899,7 +1895,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                 <Users className={`w-4 h-4 ${activeTab === "team" ? "text-white" : "text-[#1C2E24]/60"}`} />
                 <span>Perfiles de Empleados</span>
               </div>
-              <span className="text-[10px] font-bold text-[#1C2E24]/40 font-mono">
+              <span className="text-[11px] font-bold text-[#1C2E24]/40 font-mono">
                 {teamMembers.length}
               </span>
             </button>
@@ -1917,7 +1913,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                 <DollarSign className={`w-4 h-4 ${activeTab === "salarios" ? "text-white" : "text-[#1C2E24]/60"}`} />
                 <span>Nómina & Salarios</span>
               </div>
-              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-purple-100 text-purple-700">
+              <span className="text-[11px] font-black uppercase px-2 py-0.5 rounded-md bg-purple-100 text-purple-700">
                 Beta
               </span>
             </button>
@@ -1925,7 +1921,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
           {/* Section: SOPORTE */}
           <div className="space-y-1">
-            <div className="px-3 text-[10px] font-black uppercase tracking-[0.14em] text-[#1C2E24]/40 mb-2">
+            <div className="px-3 text-[11px] font-black uppercase tracking-[0.14em] text-[#1C2E24]/40 mb-2">
               Soporte
             </div>
 
@@ -1949,7 +1945,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                 <Shield className={`w-4 h-4 ${activeTab === "security" ? "text-white" : "text-[#1C2E24]/60"}`} />
                 <span>Seguridad & Roles</span>
               </div>
-              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
+              <span className="text-[11px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
                 Activo
               </span>
             </button>
@@ -1966,7 +1962,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
               </div>
               <div className="text-left">
                 <div className="text-xs font-black text-[#1C2E24] leading-tight">Sede Chapinero</div>
-                <div className="text-[10px] font-bold text-[#1C2E24]/50 leading-tight">Bogotá, D.C.</div>
+                <div className="text-[11px] font-bold text-[#1C2E24]/50 leading-tight">Bogotá, D.C.</div>
               </div>
             </div>
             <ChevronDown className="w-4 h-4 text-[#1C2E24]/40" />
@@ -2063,7 +2059,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
               placeholder="Buscar cierres, colaboradores, fechas..."
               className="w-full bg-slate-50 border border-slate-200/80 rounded-xl pl-9 pr-14 py-2 text-xs font-medium text-[#1C2E24] placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-[#1E3E30] focus:bg-white transition-all"
             />
-            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-mono font-bold text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded-md shadow-2xs">
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-mono font-bold text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded-md shadow-2xs">
               ⌘K
             </span>
           </div>
@@ -2097,7 +2093,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
               />
               <div className="flex flex-col text-left">
                 <span className="text-xs font-black text-[#1C2E24] leading-tight">{username || "Victor Ospina"}</span>
-                <span className="text-[10px] font-bold text-slate-400 leading-tight">Gerente de Operaciones</span>
+                <span className="text-[11px] font-bold text-slate-400 leading-tight">Gerente de Operaciones</span>
               </div>
               <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
             </div>
@@ -2475,7 +2471,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                             >
                               {/* Peak Day floating badge */}
                               {day.isPeak && (
-                                <div className="absolute -top-1 bg-[#1E3E30] text-white text-[10px] font-mono font-black px-2 py-0.5 rounded-md shadow-xs -translate-x-1/2 left-1/2 whitespace-nowrap animate-bounce">
+                                <div className="absolute -top-1 bg-[#1E3E30] text-white text-[11px] font-mono font-black px-2 py-0.5 rounded-md shadow-xs -translate-x-1/2 left-1/2 whitespace-nowrap animate-bounce">
                                   {formatCOP(day.total)}
                                 </div>
                               )}
@@ -2586,7 +2582,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                     <div className="mt-4 overflow-x-auto">
                       <table className="w-full text-left">
                         <thead>
-                          <tr className="border-b border-slate-100 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                          <tr className="border-b border-slate-100 text-[11px] font-black uppercase tracking-wider text-slate-400">
                             <th className="pb-3 pl-2">Fecha / Colaborador</th>
                             <th className="pb-3">Estado Cuadre</th>
                             <th className="pb-3">Recaudo Total</th>
@@ -2621,12 +2617,12 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                   <td className="py-3">
                                     <div className="space-y-1">
                                       {isCuadrado ? (
-                                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[10px] font-black bg-emerald-50 text-emerald-700">
+                                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[11px] font-black bg-emerald-50 text-emerald-700">
                                           <Check className="w-3 h-3 stroke-[3]" />
                                           <span>Cuadrado 100%</span>
                                         </span>
                                       ) : (
-                                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-50 text-amber-700">
+                                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[11px] font-black bg-amber-50 text-amber-700">
                                           <Clock className="w-3 h-3" />
                                           <span>Pendiente</span>
                                         </span>
@@ -2764,12 +2760,12 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                 {c.fecha}
                               </span>
                               {c.colaboradorNombre && (
-                                <span className="text-[10px] font-bold block truncate max-w-[170px] text-brand-ink/70">
+                                <span className="text-[11px] font-bold block truncate max-w-[170px] text-brand-ink/70">
                                   Por: {c.colaboradorNombre}
                                 </span>
                               )}
                             </div>
-                            <span className={`px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-xs border ${
+                            <span className={`px-2 py-0.5 text-[11px] font-black uppercase tracking-wider rounded-xs border ${
                               isSelected
                                 ? "bg-emerald-100 text-emerald-900 border-emerald-400 font-black"
                                 : "bg-amber-100 text-amber-900 border-amber-300 font-bold"
@@ -2780,11 +2776,11 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
                           <div className="pt-2.5 border-t border-brand-ink/10 flex items-center justify-between text-xs font-mono">
                             <div>
-                              <span className="text-[9px] uppercase font-sans font-bold block text-brand-ink/50">Total Físico</span>
+                              <span className="text-[11px] uppercase font-sans font-bold block text-brand-ink/50">Total Físico</span>
                               <span className="font-black text-sm text-brand-ink">{formatCOP(totalM)}</span>
                             </div>
                             <div className="text-right">
-                              <span className="text-[9px] uppercase font-sans font-bold block text-brand-ink/50">Propinas</span>
+                              <span className="text-[11px] uppercase font-sans font-bold block text-brand-ink/50">Propinas</span>
                               <span className="font-bold text-brand-ink">{formatCOP(c.propinas)}</span>
                             </div>
                           </div>
@@ -2803,7 +2799,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                       <div className="bg-white border-2 border-brand-ink p-6 shadow-[4px_4px_0px_0px_#1C1917]">
                         <div className="flex items-center justify-between border-b-2 border-brand-ink pb-4 mb-5">
                           <div>
-                            <span className="text-[9px] bg-brand-ink text-white px-2.5 py-0.5 font-mono font-black uppercase">Auditoría en Progreso</span>
+                            <span className="text-[11px] bg-brand-ink text-white px-2.5 py-0.5 font-mono font-black uppercase">Auditoría en Progreso</span>
                             <h3 className="text-lg font-black text-brand-ink tracking-tight uppercase mt-1.5">Cierre del {currentCierre.fecha}</h3>
                             {currentCierre.colaboradorNombre && (
                               <p className="text-[11px] font-bold text-brand-ink/70 mt-1 uppercase">
@@ -2812,7 +2808,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                             )}
                           </div>
                           <div className="text-right">
-                            <span className="text-[10px] text-brand-ink/50 block font-bold">Fecha Creación</span>
+                            <span className="text-[11px] text-brand-ink/50 block font-bold">Fecha Creación</span>
                             <span className="text-xs font-black font-mono text-brand-ink">{new Date(currentCierre.createdAt).toLocaleString("es-CO")}</span>
                           </div>
                         </div>
@@ -2825,23 +2821,23 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           
                           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 text-xs font-mono">
                             <div className="bg-white p-3.5 border-2 border-brand-ink/30 rounded-xs">
-                              <span className="text-brand-ink/50 font-black block mb-1 text-[10px] tracking-wider">EFECTIVO:</span>
+                              <span className="text-brand-ink/50 font-black block mb-1 text-[11px] tracking-wider">EFECTIVO:</span>
                               <span className="text-sm font-black text-brand-ink">{formatCOP(currentCierre.efectivoCierre)}</span>
                             </div>
                             <div className="bg-white p-3.5 border-2 border-brand-ink/30 rounded-xs">
-                              <span className="text-brand-ink/50 font-black block mb-1 text-[10px] tracking-wider">DATÁFONO:</span>
+                              <span className="text-brand-ink/50 font-black block mb-1 text-[11px] tracking-wider">DATÁFONO:</span>
                               <span className="text-sm font-black text-brand-ink">{formatCOP(currentCierre.datafonoCierre)}</span>
                             </div>
                             <div className="bg-white p-3.5 border-2 border-brand-ink/30 rounded-xs">
-                              <span className="text-brand-ink/50 font-black block mb-1 text-[10px] tracking-wider">JUSTO APP:</span>
+                              <span className="text-brand-ink/50 font-black block mb-1 text-[11px] tracking-wider">JUSTO APP:</span>
                               <span className="text-sm font-black text-brand-ink">{formatCOP(currentCierre.justoCierre)}</span>
                             </div>
                             <div className="bg-white p-3.5 border-2 border-brand-ink/30 rounded-xs">
-                              <span className="text-brand-ink/50 font-black block mb-1 text-[10px] tracking-wider">RAPPI APP:</span>
+                              <span className="text-brand-ink/50 font-black block mb-1 text-[11px] tracking-wider">RAPPI APP:</span>
                               <span className="text-sm font-black text-brand-ink">{formatCOP(currentCierre.rappiCierre)}</span>
                             </div>
                             <div className="bg-white p-3.5 border-2 border-brand-ink/30 rounded-xs">
-                              <span className="text-brand-ink/50 font-black block mb-1 text-[10px] tracking-wider">TRANSF.:</span>
+                              <span className="text-brand-ink/50 font-black block mb-1 text-[11px] tracking-wider">TRANSF.:</span>
                               <span className="text-sm font-black text-brand-ink">{formatCOP(currentCierre.transferenciasCierre || 0)}</span>
                             </div>
                           </div>
@@ -2861,7 +2857,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
                           {currentCierre.novedades && (
                             <div className="mt-4 bg-white p-3.5 border border-brand-ink text-xs">
-                              <span className="font-black text-brand-ink/60 block mb-1 uppercase tracking-wider text-[10px]">Novedades del Turno:</span>
+                              <span className="font-black text-brand-ink/60 block mb-1 uppercase tracking-wider text-[11px]">Novedades del Turno:</span>
                               <p className="text-brand-ink leading-relaxed font-sans font-medium italic">"{currentCierre.novedades}"</p>
                             </div>
                           )}
@@ -2871,18 +2867,18 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                         <div className="bg-white p-4 sm:p-5 border-2 border-brand-ink mb-5 space-y-3 shadow-[3px_3px_0px_0px_#1C1917]">
                           <div className="flex flex-wrap justify-between items-center gap-2 border-b border-brand-bg pb-2.5">
                             <h4 className="text-xs font-black text-brand-ink uppercase tracking-wider flex items-center space-x-1.5">
-                              <span className="bg-zinc-800 text-white px-2 py-0.5 rounded-sm font-black mr-1 text-[10px] font-sans">Paso 1</span>
+                              <span className="bg-zinc-800 text-white px-2 py-0.5 rounded-sm font-black mr-1 text-[11px] font-sans">Paso 1</span>
                               <span>Cargar Reporte de POS</span>
                             </h4>
                             <div className="flex items-center gap-2">
-                              <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-300 font-black px-2 py-0.5 uppercase font-sans">
+                              <span className="text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-300 font-black px-2 py-0.5 uppercase font-sans">
                                 Opcional • Automatización
                               </span>
                               {posData && (
                                 <button
                                   type="button"
                                   onClick={() => setPosData(null)}
-                                  className="text-[10px] text-zinc-500 hover:text-red-700 underline font-bold cursor-pointer transition-colors"
+                                  className="text-[11px] text-zinc-500 hover:text-red-700 underline font-bold cursor-pointer transition-colors"
                                 >
                                   Quitar reporte
                                 </button>
@@ -2909,7 +2905,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                               <span className="bg-brand-success text-white px-2 py-0.5 rounded-sm font-black mr-1 text-[11px] font-sans">Paso 2</span>
                               <span>Conciliación de Auditoría Real</span>
                             </h4>
-                            <span className="text-[10px] bg-brand-success/20 text-brand-success border border-brand-success/30 font-black px-2 py-0.5 uppercase font-sans">
+                            <span className="text-[11px] bg-brand-success/20 text-brand-success border border-brand-success/30 font-black px-2 py-0.5 uppercase font-sans">
                               Valores de Conciliación Reales
                             </span>
                           </div>
@@ -2928,7 +2924,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           <div className="w-full overflow-x-auto border-2 border-brand-ink/20 rounded-sm bg-white shadow-[2px_2px_0px_0px_#1C1917]">
                             <table className="w-full text-xs text-left border-collapse">
                               <thead>
-                                <tr className="border-b-2 border-brand-ink bg-brand-bg/60 text-brand-ink/80 uppercase tracking-wider text-[10px] font-black">
+                                <tr className="border-b-2 border-brand-ink bg-brand-bg/60 text-brand-ink/80 uppercase tracking-wider text-[11px] font-black">
                                   <th className="py-3.5 px-5 text-left w-[22%]">Canal Recaudo</th>
                                   <th className="py-3.5 px-5 text-right whitespace-nowrap w-[18%]">Cierre Físico (Equipo)</th>
                                   <th className="py-3.5 px-5 text-right whitespace-nowrap w-[18%]">Lectura POS</th>
@@ -2945,11 +2941,11 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                     {formatCOP(currentCierre.efectivoCierre)}
                                   </td>
                                   <td className="py-3.5 px-5 text-right text-zinc-500 font-bold tabular-nums whitespace-nowrap">
-                                    {posData ? formatCOP(posData.efectivoPOS) : (currentCierre.efectivoPOS !== undefined && currentCierre.efectivoPOS !== null ? formatCOP(currentCierre.efectivoPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
+                                    {posData ? formatCOP(posData.efectivoPOS) : (currentCierre.efectivoPOS !== undefined && currentCierre.efectivoPOS !== null ? formatCOP(currentCierre.efectivoPOS) : <span className="text-[11px] text-zinc-400 font-sans italic">Sin POS</span>)}
                                   </td>
                                   <td className="py-2.5 px-5 text-right whitespace-nowrap">
                                     <div className="flex justify-end items-center">
-                                      <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
+                                      <span className="text-[11px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
                                       <input
                                         type="text"
                                         value={formatInputNumber(reconcileEfectivo)}
@@ -2968,19 +2964,19 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                 <tr className="hover:bg-brand-bg/10 transition-colors">
                                   <td className="py-3.5 px-5 font-sans font-bold text-brand-ink">
                                     <span>Tarjetas / Datáfono</span>
-                                    <p className="text-[9px] text-brand-ink/50 font-normal">Auditoría manual por vouchers</p>
+                                    <p className="text-[11px] text-brand-ink/50 font-normal">Auditoría manual por vouchers</p>
                                   </td>
                                   <td className="py-3.5 px-5 text-right text-brand-ink font-bold tabular-nums whitespace-nowrap">
                                     {formatCOP(currentCierre.datafonoCierre)}
                                   </td>
                                   <td className="py-3.5 px-5 text-right font-medium whitespace-nowrap">
-                                    <span className="inline-flex items-center text-[10px] text-zinc-500 bg-zinc-100 border border-zinc-200 px-2 py-0.5 rounded font-sans font-medium">
+                                    <span className="inline-flex items-center text-[11px] text-zinc-500 bg-zinc-100 border border-zinc-200 px-2 py-0.5 rounded font-sans font-medium">
                                       N/A (Auditoría manual)
                                     </span>
                                   </td>
                                   <td className="py-2.5 px-5 text-right whitespace-nowrap">
                                     <div className="flex justify-end items-center">
-                                      <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
+                                      <span className="text-[11px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
                                       <input
                                         type="text"
                                         value={formatInputNumber(reconcileDatafono)}
@@ -2999,21 +2995,21 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                 <tr className="hover:bg-brand-bg/10 transition-colors">
                                   <td className="py-3.5 px-5 font-sans font-bold text-brand-ink">
                                     <span>Justo App</span>
-                                    <p className="text-[9px] text-brand-ink/50 font-normal">API Justo v3 / Portal Justo</p>
+                                    <p className="text-[11px] text-brand-ink/50 font-normal">API Justo v3 / Portal Justo</p>
                                   </td>
                                   <td className="py-3.5 px-5 text-right text-brand-ink font-bold tabular-nums whitespace-nowrap">
                                     {isLoadingCanales ? (
-                                      <span className="text-[10px] text-brand-ink/50 italic font-sans animate-pulse">Consultando API Justo...</span>
+                                      <span className="text-[11px] text-brand-ink/50 italic font-sans animate-pulse">Consultando API Justo...</span>
                                     ) : (
                                       formatCOP(currentCierre.justoCierre || reconcileJusto || posData?.justoPOS || currentCierre.justoPOS || 0)
                                     )}
                                   </td>
                                   <td className="py-3.5 px-5 text-right text-zinc-500 font-bold tabular-nums whitespace-nowrap">
-                                    {posData ? formatCOP(posData.justoPOS) : (currentCierre.justoPOS !== undefined && currentCierre.justoPOS !== null ? formatCOP(currentCierre.justoPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
+                                    {posData ? formatCOP(posData.justoPOS) : (currentCierre.justoPOS !== undefined && currentCierre.justoPOS !== null ? formatCOP(currentCierre.justoPOS) : <span className="text-[11px] text-zinc-400 font-sans italic">Sin POS</span>)}
                                   </td>
                                   <td className="py-2.5 px-5 text-right whitespace-nowrap">
                                     <div className="flex justify-end items-center">
-                                      <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
+                                      <span className="text-[11px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
                                       <input
                                         type="text"
                                         value={formatInputNumber(reconcileJusto)}
@@ -3032,23 +3028,23 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                 <tr className="hover:bg-brand-bg/10 transition-colors">
                                   <td className="py-3.5 px-5 font-sans font-bold text-brand-ink">
                                     <span>Rappi App</span>
-                                    <p className="text-[9px] text-brand-ink/50 font-normal">Sin API directa • Lectura POS (CxC RAPPI)</p>
+                                    <p className="text-[11px] text-brand-ink/50 font-normal">Sin API directa • Lectura POS (CxC RAPPI)</p>
                                   </td>
                                   <td className="py-3.5 px-5 text-right font-medium whitespace-nowrap">
                                     {currentCierre.rappiCierre && currentCierre.rappiCierre !== (posData?.rappiPOS || 0) ? (
                                       <span className="text-brand-ink font-bold tabular-nums">{formatCOP(currentCierre.rappiCierre)}</span>
                                     ) : (
-                                      <span className="inline-flex items-center text-[10px] text-amber-900 bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded font-sans font-medium">
+                                      <span className="inline-flex items-center text-[11px] text-amber-900 bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded font-sans font-medium">
                                         Sin API directa (Revisar Portal)
                                       </span>
                                     )}
                                   </td>
                                   <td className="py-3.5 px-5 text-right text-zinc-500 font-bold tabular-nums whitespace-nowrap">
-                                    {posData ? formatCOP(posData.rappiPOS) : (currentCierre.rappiPOS !== undefined && currentCierre.rappiPOS !== null ? formatCOP(currentCierre.rappiPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
+                                    {posData ? formatCOP(posData.rappiPOS) : (currentCierre.rappiPOS !== undefined && currentCierre.rappiPOS !== null ? formatCOP(currentCierre.rappiPOS) : <span className="text-[11px] text-zinc-400 font-sans italic">Sin POS</span>)}
                                   </td>
                                   <td className="py-2.5 px-5 text-right whitespace-nowrap">
                                     <div className="flex justify-end items-center">
-                                      <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
+                                      <span className="text-[11px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
                                       <input
                                         type="text"
                                         value={formatInputNumber(reconcileRappi)}
@@ -3067,20 +3063,20 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                 <tr className="hover:bg-brand-bg/10 transition-colors">
                                   <td className="py-3.5 px-5 font-sans font-bold text-brand-ink">
                                     <span>Transferencias</span>
-                                    <p className="text-[9px] text-brand-ink/50 font-normal">Auditoría manual por vouchers</p>
+                                    <p className="text-[11px] text-brand-ink/50 font-normal">Auditoría manual por vouchers</p>
                                   </td>
                                   <td className="py-3.5 px-5 text-right font-medium whitespace-nowrap">
-                                    <span className="inline-flex items-center text-[10px] text-zinc-500 bg-zinc-100 border border-zinc-200 px-2 py-0.5 rounded font-sans font-medium">
+                                    <span className="inline-flex items-center text-[11px] text-zinc-500 bg-zinc-100 border border-zinc-200 px-2 py-0.5 rounded font-sans font-medium">
                                       N/A (Auditoría manual)
                                     </span>
                                   </td>
                                   <td className="py-3.5 px-5 text-right text-zinc-500 font-bold tabular-nums whitespace-nowrap">
-                                    {posData ? formatCOP(posData.transferenciasPOS) : (currentCierre.transferenciasPOS !== undefined && currentCierre.transferenciasPOS !== null ? formatCOP(currentCierre.transferenciasPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
+                                    {posData ? formatCOP(posData.transferenciasPOS) : (currentCierre.transferenciasPOS !== undefined && currentCierre.transferenciasPOS !== null ? formatCOP(currentCierre.transferenciasPOS) : <span className="text-[11px] text-zinc-400 font-sans italic">Sin POS</span>)}
                                   </td>
                                   <td className="py-2.5 px-5 text-right whitespace-nowrap">
                                     <div className="flex items-center justify-end space-x-2">
                                       <label className="flex items-center space-x-1 cursor-pointer select-none">
-                                        <span className="text-[10px] font-bold text-brand-ink/70">¿Coincide?</span>
+                                        <span className="text-[11px] font-bold text-brand-ink/70">¿Coincide?</span>
                                         <input
                                           type="checkbox"
                                           checked={transferenciasCoincide}
@@ -3094,7 +3090,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                         />
                                       </label>
                                       <div className="flex items-center">
-                                        <span className="text-[10px] text-zinc-400 mr-1 font-bold font-sans">$</span>
+                                        <span className="text-[11px] text-zinc-400 mr-1 font-bold font-sans">$</span>
                                         <input
                                           type="text"
                                           value={formatInputNumber(reconcileTransferencias)}
@@ -3126,7 +3122,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                               <div>
                                 <strong className="uppercase font-black block tracking-wider mb-1">⚠️ Se detectaron anulaciones en el POS:</strong>
                                 <p className="font-semibold leading-relaxed text-brand-ink">{posData.anulacionesNote}</p>
-                                <p className="mt-1.5 text-[10px] font-black uppercase text-amber-800">Esta nota se agregará automáticamente a las novedades de este cierre al aprobar.</p>
+                                <p className="mt-1.5 text-[11px] font-black uppercase text-amber-800">Esta nota se agregará automáticamente a las novedades de este cierre al aprobar.</p>
                               </div>
                             </div>
                           )}
@@ -3145,7 +3141,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                               <div className="bg-brand-bg p-5 border-2 border-brand-ink space-y-4 shadow-[2px_2px_0px_0px_#1C1917]">
                                 <div className="flex items-center space-x-2 border-b border-brand-ink/10 pb-2">
                                   <Users className="w-4 h-4 text-brand-ink" />
-                                  <h4 className="text-[10px] font-black text-brand-ink uppercase tracking-wider">
+                                  <h4 className="text-[11px] font-black text-brand-ink uppercase tracking-wider">
                                     Registro de Equipo del Turno & Distribución de Faltante (Política 60% / 40%)
                                   </h4>
                                 </div>
@@ -3153,7 +3149,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                   {/* Entrada del Líder de Punto */}
                                   <div className="space-y-1.5">
-                                    <label className="text-[10px] font-black uppercase text-brand-ink/70 block tracking-wider">
+                                    <label className="text-[11px] font-black uppercase text-brand-ink/70 block tracking-wider">
                                       Líder de Punto (Asume el 60%)
                                     </label>
                                     <div className="flex">
@@ -3165,14 +3161,14 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                         className="w-full text-xs font-bold border-2 border-brand-ink bg-white p-2.5 outline-none focus:bg-amber-50"
                                       />
                                     </div>
-                                    <p className="text-[9px] text-brand-ink/50 font-bold">
+                                    <p className="text-[11px] text-brand-ink/50 font-bold">
                                       Por política, el Líder de Punto asume el 60% del faltante total.
                                     </p>
                                   </div>
 
                                   {/* Entrada de los Auxiliares de Venta */}
                                   <div className="space-y-1.5">
-                                    <label className="text-[10px] font-black uppercase text-brand-ink/70 block tracking-wider">
+                                    <label className="text-[11px] font-black uppercase text-brand-ink/70 block tracking-wider">
                                       Auxiliares de Venta (Dividen el 40% restante)
                                     </label>
                                     <div className="flex space-x-2">
@@ -3205,7 +3201,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                         <Plus className="w-3.5 h-3.5" />
                                       </button>
                                     </div>
-                                    <p className="text-[9px] text-brand-ink/50 font-bold">
+                                    <p className="text-[11px] text-brand-ink/50 font-bold">
                                       Presione Enter o el botón (+) para agregar auxiliares. El 40% se divide equitativamente entre ellos.
                                     </p>
                                   </div>
@@ -3213,7 +3209,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
                                 {/* Listado de Auxiliares Agregados */}
                                 <div className="bg-white p-3 border-2 border-brand-ink">
-                                  <span className="text-[9px] text-brand-ink/50 uppercase tracking-wider block font-black mb-2">
+                                  <span className="text-[11px] text-brand-ink/50 uppercase tracking-wider block font-black mb-2">
                                     Auxiliares en el Turno ({numAuxiliares})
                                   </span>
                                   {numAuxiliares === 0 ? (
@@ -3261,14 +3257,14 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 font-mono text-xs">
                                       {/* Distribución Líder */}
                                       <div className="bg-white p-2.5 border border-brand-ink text-brand-ink">
-                                        <div className="text-[9px] font-black uppercase tracking-wider text-brand-ink/50">Líder de Punto ({numElegibles > 0 ? "60%" : "100%"})</div>
+                                        <div className="text-[11px] font-black uppercase tracking-wider text-brand-ink/50">Líder de Punto ({numElegibles > 0 ? "60%" : "100%"})</div>
                                         <div className="font-bold text-brand-ink truncate mt-0.5">{liderInputName || "Sin asignar"}</div>
                                         <div className="text-sm font-black text-brand-danger mt-1">{formatCOP(shareLider)}</div>
                                       </div>
 
                                       {/* Distribución Auxiliares */}
                                       <div className="bg-white p-2.5 border border-brand-ink text-brand-ink">
-                                        <div className="text-[9px] font-black uppercase tracking-wider text-brand-ink/50">Auxiliares (40% Total)</div>
+                                        <div className="text-[11px] font-black uppercase tracking-wider text-brand-ink/50">Auxiliares (40% Total)</div>
                                         <div className="font-bold text-brand-ink truncate mt-0.5">
                                           {numElegibles > 0
                                             ? `${numElegibles} personas (${formatCOP(shareAuxiliaresTotal)})`
@@ -3285,7 +3281,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                     </div>
 
                                     {numElegibles === 0 && (
-                                      <div className="bg-amber-50 border border-amber-500 p-2 text-amber-800 text-[10px] font-bold mt-1 uppercase tracking-wide">
+                                      <div className="bg-amber-50 border border-amber-500 p-2 text-amber-800 text-[11px] font-bold mt-1 uppercase tracking-wide">
                                         ⚠️ Atención: Al no haber auxiliares elegibles, el 40% restante se suma al cobro del Líder de Punto para cubrir el total del faltante.
                                       </div>
                                     )}
@@ -3317,7 +3313,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                             return (
                               <div className="bg-brand-bg border-2 border-brand-ink p-4 flex flex-col sm:flex-row justify-between items-center gap-3 shadow-[2px_2px_0px_0px_#1C1917]">
                                 <div className="text-center sm:text-left">
-                                  <span className="text-[9px] text-brand-ink/50 uppercase tracking-wider block font-black">Desfase Acumulado Total</span>
+                                  <span className="text-[11px] text-brand-ink/50 uppercase tracking-wider block font-black">Desfase Acumulado Total</span>
                                   <span className="text-sm font-black font-mono block mt-0.5 text-brand-ink">
                                     {totalDif === 0 
                                       ? "Diferencia General: $0 (Caja Cuadrada Perfecta)" 
@@ -3352,12 +3348,12 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                       
                       <div className="mt-8 flex flex-col sm:flex-row gap-3 items-center justify-center text-xs text-brand-ink/60 font-bold">
                         <div className="flex items-center space-x-2">
-                          <span className="inline-block px-2 py-0.5 text-[10px] font-black bg-emerald-50 text-brand-success border border-brand-success uppercase">Cuadrado</span>
+                          <span className="inline-block px-2 py-0.5 text-[11px] font-black bg-emerald-50 text-brand-success border border-brand-success uppercase">Cuadrado</span>
                           <span>Mapeo en Verde si cuadra ($0)</span>
                         </div>
                         <span className="hidden sm:inline text-brand-ink/20">|</span>
                         <div className="flex items-center space-x-2">
-                          <span className="inline-block px-2 py-0.5 text-[10px] font-black bg-red-50 text-brand-danger border border-brand-danger uppercase">Faltante</span>
+                          <span className="inline-block px-2 py-0.5 text-[11px] font-black bg-red-50 text-brand-danger border border-brand-danger uppercase">Faltante</span>
                           <span>Mapeo en Rojo si hay faltantes</span>
                         </div>
                       </div>
@@ -3397,7 +3393,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                     
                     <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                       <div className="flex items-center space-x-1 bg-white border border-brand-ink px-2 py-1 shadow-[1px_1px_0px_0px_#1C1917]">
-                        <span className="text-[10px] font-black uppercase tracking-wide text-brand-ink/50">Desde:</span>
+                        <span className="text-[11px] font-black uppercase tracking-wide text-brand-ink/50">Desde:</span>
                         <input
                           type="date"
                           value={historyStartDate}
@@ -3407,7 +3403,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                       </div>
 
                       <div className="flex items-center space-x-1 bg-white border border-brand-ink px-2 py-1 shadow-[1px_1px_0px_0px_#1C1917]">
-                        <span className="text-[10px] font-black uppercase tracking-wide text-brand-ink/50">Hasta:</span>
+                        <span className="text-[11px] font-black uppercase tracking-wide text-brand-ink/50">Hasta:</span>
                         <input
                           type="date"
                           value={historyEndDate}
@@ -3422,7 +3418,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                             setHistoryStartDate("");
                             setHistoryEndDate("");
                           }}
-                          className="px-2 py-0.5 bg-white hover:bg-zinc-100 border border-brand-ink text-brand-ink text-[10px] font-black uppercase tracking-wider cursor-pointer shadow-[1px_1px_0px_0px_#1C1917]"
+                          className="px-2 py-0.5 bg-white hover:bg-zinc-100 border border-brand-ink text-brand-ink text-[11px] font-black uppercase tracking-wider cursor-pointer shadow-[1px_1px_0px_0px_#1C1917]"
                         >
                           Limpiar
                         </button>
@@ -3436,7 +3432,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                     <div className="flex border-2 border-brand-ink bg-white shadow-[1px_1px_0px_0px_#1C1917] p-0.5">
                       <button
                         onClick={() => setHistoryDeficitFilter("all")}
-                        className={`px-3 py-1 text-[10px] font-black uppercase tracking-wider cursor-pointer transition-colors ${
+                        className={`px-3 py-1 text-[11px] font-black uppercase tracking-wider cursor-pointer transition-colors ${
                           historyDeficitFilter === "all"
                             ? "bg-brand-ink text-white"
                             : "bg-white hover:bg-zinc-100 text-brand-ink"
@@ -3446,7 +3442,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                       </button>
                       <button
                         onClick={() => setHistoryDeficitFilter("deficit")}
-                        className={`px-3 py-1 text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center space-x-1.5 transition-colors ${
+                        className={`px-3 py-1 text-[11px] font-black uppercase tracking-wider cursor-pointer flex items-center space-x-1.5 transition-colors ${
                           historyDeficitFilter === "deficit"
                             ? "bg-brand-danger text-white"
                             : "bg-white hover:bg-zinc-100 text-brand-ink"
@@ -3490,14 +3486,14 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-brand-ink pb-3">
                           <div className="flex items-center space-x-2.5">
                             <span className="text-xs font-black text-brand-ink block">{c.fecha}</span>
-                            <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 text-[9px] font-black bg-emerald-50 text-brand-success border border-brand-success uppercase tracking-wider">
+                            <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 text-[11px] font-black bg-emerald-50 text-brand-success border border-brand-success uppercase tracking-wider">
                               <CheckCircle2 className="w-3 h-3 text-brand-success" />
                               <span>Cuadrado</span>
                             </span>
                           </div>
 
                           <div className="flex flex-wrap items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
-                            <div className="text-[10px] text-brand-ink/50 flex flex-wrap gap-x-3 gap-y-1 font-mono font-bold uppercase">
+                            <div className="text-[11px] text-brand-ink/50 flex flex-wrap gap-x-3 gap-y-1 font-mono font-bold uppercase">
                               {c.colaboradorNombre && (
                                 <>
                                   <span>Registrado por: <strong className="text-brand-ink font-sans font-black">{c.colaboradorNombre}</strong></span>
@@ -3511,17 +3507,17 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
                             {/* Botón de Eliminar */}
                             {deletingId === c.id ? (
-                              <div className="flex items-center space-x-2 bg-red-50 border border-brand-danger px-2.5 py-1 text-[10px] transition-all">
+                              <div className="flex items-center space-x-2 bg-red-50 border border-brand-danger px-2.5 py-1 text-[11px] transition-all">
                                 <span className="font-black text-brand-danger uppercase">¿Confirmar?</span>
                                 <button 
                                   onClick={() => handleDeleteCierre(c.id)}
-                                  className="px-2 py-0.5 bg-brand-danger text-white hover:bg-red-700 font-black uppercase text-[9px] cursor-pointer"
+                                  className="px-2 py-0.5 bg-brand-danger text-white hover:bg-red-700 font-black uppercase text-[11px] cursor-pointer"
                                 >
                                   Sí, Borrar
                                 </button>
                                 <button 
                                   onClick={() => setDeletingId(null)}
-                                  className="px-2 py-0.5 bg-zinc-200 text-brand-ink hover:bg-zinc-300 font-black uppercase text-[9px] cursor-pointer"
+                                  className="px-2 py-0.5 bg-zinc-200 text-brand-ink hover:bg-zinc-300 font-black uppercase text-[11px] cursor-pointer"
                                 >
                                   No
                                 </button>
@@ -3529,7 +3525,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                             ) : (
                               <button
                                 onClick={() => setDeletingId(c.id)}
-                                className="px-2 py-1 text-brand-danger hover:bg-red-50 border border-transparent hover:border-brand-danger flex items-center space-x-1 font-black uppercase text-[10px] tracking-wider transition-colors cursor-pointer"
+                                className="px-2 py-1 text-brand-danger hover:bg-red-50 border border-transparent hover:border-brand-danger flex items-center space-x-1 font-black uppercase text-[11px] tracking-wider transition-colors cursor-pointer"
                                 title="Eliminar este cierre de caja"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -3545,11 +3541,11 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           {/* Efectivo */}
                           <div className="bg-white p-3 border border-brand-ink flex justify-between items-center">
                             <div>
-                              <span className="text-brand-ink/40 text-[10px] block font-sans font-black">EFECTIVO</span>
+                              <span className="text-brand-ink/40 text-[11px] block font-sans font-black">EFECTIVO</span>
                               <span className="font-bold text-brand-ink block mt-0.5">{formatCOP(c.efectivoCierre)}</span>
                             </div>
                             <div className="text-right">
-                              <span className="text-brand-ink/50 text-[9px] block font-bold">POS: {formatCOP(c.efectivoPOS || 0)}</span>
+                              <span className="text-brand-ink/50 text-[11px] block font-bold">POS: {formatCOP(c.efectivoPOS || 0)}</span>
                               <span className="block mt-0.5">{getDiferenciaBadge(c.difEfectivo || 0)}</span>
                             </div>
                           </div>
@@ -3557,11 +3553,11 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           {/* Datáfono */}
                           <div className="bg-white p-3 border border-brand-ink flex justify-between items-center">
                             <div>
-                              <span className="text-brand-ink/40 text-[10px] block font-sans font-black">DATÁFONO</span>
+                              <span className="text-brand-ink/40 text-[11px] block font-sans font-black">DATÁFONO</span>
                               <span className="font-bold text-brand-ink block mt-0.5">{formatCOP(c.datafonoCierre)}</span>
                             </div>
                             <div className="text-right">
-                              <span className="text-brand-ink/50 text-[9px] block font-bold">POS: {formatCOP(c.tarjetasPOS || 0)}</span>
+                              <span className="text-brand-ink/50 text-[11px] block font-bold">POS: {formatCOP(c.tarjetasPOS || 0)}</span>
                               <span className="block mt-0.5">{getDiferenciaBadge(c.difTarjetas || 0)}</span>
                             </div>
                           </div>
@@ -3569,11 +3565,11 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           {/* Justo */}
                           <div className="bg-white p-3 border border-brand-ink flex justify-between items-center">
                             <div>
-                              <span className="text-brand-ink/40 text-[10px] block font-sans font-black">JUSTO APP</span>
+                              <span className="text-brand-ink/40 text-[11px] block font-sans font-black">JUSTO APP</span>
                               <span className="font-bold text-brand-ink block mt-0.5">{formatCOP(c.justoCierre)}</span>
                             </div>
                             <div className="text-right">
-                              <span className="text-brand-ink/50 text-[9px] block font-bold">POS: {formatCOP(c.justoPOS || 0)}</span>
+                              <span className="text-brand-ink/50 text-[11px] block font-bold">POS: {formatCOP(c.justoPOS || 0)}</span>
                               <span className="block mt-0.5">{getDiferenciaBadge(c.difJusto || 0)}</span>
                             </div>
                           </div>
@@ -3581,11 +3577,11 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           {/* Rappi */}
                           <div className="bg-white p-3 border border-brand-ink flex justify-between items-center">
                             <div>
-                              <span className="text-brand-ink/40 text-[10px] block font-sans font-black">RAPPI APP</span>
+                              <span className="text-brand-ink/40 text-[11px] block font-sans font-black">RAPPI APP</span>
                               <span className="font-bold text-brand-ink block mt-0.5">{formatCOP(c.rappiCierre)}</span>
                             </div>
                             <div className="text-right">
-                              <span className="text-brand-ink/50 text-[9px] block font-bold">POS: {formatCOP(c.rappiPOS || 0)}</span>
+                              <span className="text-brand-ink/50 text-[11px] block font-bold">POS: {formatCOP(c.rappiPOS || 0)}</span>
                               <span className="block mt-0.5">{getDiferenciaBadge(c.difRappi || 0)}</span>
                             </div>
                           </div>
@@ -3593,11 +3589,11 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           {/* Transferencias */}
                           <div className="bg-white p-3 border border-brand-ink flex justify-between items-center">
                             <div>
-                              <span className="text-brand-ink/40 text-[10px] block font-sans font-black">TRANSFERENCIAS</span>
+                              <span className="text-brand-ink/40 text-[11px] block font-sans font-black">TRANSFERENCIAS</span>
                               <span className="font-bold text-brand-ink block mt-0.5">{formatCOP(c.transferenciasCierre || 0)}</span>
                             </div>
                             <div className="text-right">
-                              <span className="text-brand-ink/50 text-[9px] block font-bold">POS: {formatCOP(c.transferenciasPOS || 0)}</span>
+                              <span className="text-brand-ink/50 text-[11px] block font-bold">POS: {formatCOP(c.transferenciasPOS || 0)}</span>
                               <span className="block mt-0.5">{getDiferenciaBadge(c.difTransferencias || 0)}</span>
                             </div>
                           </div>
@@ -3607,7 +3603,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                         {/* EQUIPO DEL TURNO Y DISTRIBUCIÓN DEL DESCUADRE (POLÍTICA) */}
                         {c.liderNombre ? (
                           <div className="bg-white p-3.5 border border-brand-ink text-xs space-y-2">
-                            <div className="flex items-center space-x-1.5 text-brand-ink/70 font-black uppercase tracking-wider text-[10px]">
+                            <div className="flex items-center space-x-1.5 text-brand-ink/70 font-black uppercase tracking-wider text-[11px]">
                               <Users className="w-3.5 h-3.5 text-brand-ink" />
                               <span>Equipo de Trabajo de la Jornada</span>
                             </div>
@@ -3658,7 +3654,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           </div>
                         ) : (
                           /* Mostrar nota si es un registro histórico antiguo */
-                          <div className="bg-zinc-50/50 p-2.5 border border-dashed border-brand-ink/20 text-[10px] text-brand-ink/50 italic font-medium">
+                          <div className="bg-zinc-50/50 p-2.5 border border-dashed border-brand-ink/20 text-[11px] text-brand-ink/50 italic font-medium">
                             No se registró información de equipo para este cierre histórico anterior.
                           </div>
                         )}
@@ -3666,7 +3662,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                         {/* Novedades y Balance Total */}
                         <div className="bg-white p-3 border-2 border-brand-ink text-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-3 shadow-[2px_2px_0px_0px_#1C1917]">
                           <div className="space-y-1 max-w-xl">
-                            <span className="text-brand-ink/50 uppercase tracking-wider text-[9px] block font-black">Novedades Reportadas:</span>
+                            <span className="text-brand-ink/50 uppercase tracking-wider text-[11px] block font-black">Novedades Reportadas:</span>
                             <p className="text-brand-ink font-sans font-medium italic">"{c.novedades || "Sin novedades en el turno."}"</p>
                           </div>
                           
@@ -3720,14 +3716,14 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
               {/* Rango de fechas para Propinas */}
               <div className="flex flex-wrap items-center gap-3 bg-brand-bg p-3 border-2 border-brand-ink shadow-[2px_2px_0px_0px_#1C1917]">
                 <div className="flex items-center space-x-2">
-                  <span className="text-[10px] font-black uppercase tracking-wider text-brand-ink/60">Desde:</span>
+                  <span className="text-[11px] font-black uppercase tracking-wider text-brand-ink/60">Desde:</span>
                   <input
                     type="date"
                     value={propinasStartDate}
                     onChange={(e) => setPropinasStartDate(e.target.value)}
                     className="text-xs font-mono font-black text-brand-ink outline-none bg-white border border-brand-ink px-2 py-1 cursor-pointer"
                   />
-                  <span className="text-[10px] font-black uppercase tracking-wider text-brand-ink/60">Hasta:</span>
+                  <span className="text-[11px] font-black uppercase tracking-wider text-brand-ink/60">Hasta:</span>
                   <input
                     type="date"
                     value={propinasEndDate}
@@ -3757,7 +3753,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                     Solo se muestran los cierres que ya han sido <strong className="text-brand-success uppercase">Aprobados y Cuadrados</strong>. Marca o desmarca los días a incluir.
                   </p>
 
-                  <div className="flex items-center justify-between gap-2 bg-brand-bg p-2 border border-brand-ink/15 text-[10px] font-black uppercase tracking-wider">
+                  <div className="flex items-center justify-between gap-2 bg-brand-bg p-2 border border-brand-ink/15 text-[11px] font-black uppercase tracking-wider">
                     <button
                       type="button"
                       onClick={() => {
@@ -3826,7 +3822,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                               />
                               <div>
                                 <span className="text-xs font-black font-mono text-brand-ink">{c.fecha}</span>
-                                <span className="block text-[9px] font-bold text-brand-ink/50 uppercase tracking-wide">
+                                <span className="block text-[11px] font-bold text-brand-ink/50 uppercase tracking-wide">
                                   {teamCount === 1 ? "1 Colaborador" : `${teamCount} Colaboradores`}
                                 </span>
                               </div>
@@ -3899,13 +3895,13 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                       <>
                         <CheckCircle2 className="w-8 h-8 text-brand-success" />
                         <span className="text-xs font-black text-brand-ink truncate max-w-full block">{uploadedPosFileName}</span>
-                        <span className="text-[9px] font-bold text-brand-success uppercase tracking-wider">¡Reporte de Turnos Cargado con Éxito!</span>
+                        <span className="text-[11px] font-bold text-brand-success uppercase tracking-wider">¡Reporte de Turnos Cargado con Éxito!</span>
                       </>
                     ) : (
                       <>
                         <FileText className="w-8 h-8 text-brand-ink/50" />
                         <span className="text-xs font-black uppercase text-brand-ink">Seleccionar o soltar PDF del POS</span>
-                        <span className="text-[9px] font-semibold text-brand-ink/50">Soporta reportes de asistencia generados por el sistema de horas</span>
+                        <span className="text-[11px] font-semibold text-brand-ink/50">Soporta reportes de asistencia generados por el sistema de horas</span>
                       </>
                     )}
                   </div>
@@ -3913,7 +3909,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                   {/* Botones de simulación rápida (solo desarrollo: reemplazan el roster real con nombres ficticios) */}
                   {import.meta.env.DEV && (
                   <div className="space-y-2 pt-2">
-                    <span className="text-[9px] font-black uppercase tracking-wider text-brand-ink/50 block">SIMULAR CARGA DE HORAS POS (RÁPIDO)</span>
+                    <span className="text-[11px] font-black uppercase tracking-wider text-brand-ink/50 block">SIMULAR CARGA DE HORAS POS (RÁPIDO)</span>
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
@@ -3949,7 +3945,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                             setPropinasDaysTeam(prev => ({ ...prev, ...simulatedRoster }));
                           }, 1000);
                         }}
-                        className="p-2 border border-brand-ink text-[10px] font-black uppercase tracking-wider text-left bg-white hover:bg-zinc-50 cursor-pointer animate-[pulse_1.5s_infinite]"
+                        className="p-2 border border-brand-ink text-[11px] font-black uppercase tracking-wider text-left bg-white hover:bg-zinc-50 cursor-pointer animate-[pulse_1.5s_infinite]"
                       >
                         ⚡ 1ra Quincena
                       </button>
@@ -3985,7 +3981,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                             setPropinasDaysTeam(prev => ({ ...prev, ...simulatedRoster }));
                           }, 1000);
                         }}
-                        className="p-2 border border-brand-ink text-[10px] font-black uppercase tracking-wider text-left bg-white hover:bg-zinc-50 cursor-pointer"
+                        className="p-2 border border-brand-ink text-[11px] font-black uppercase tracking-wider text-left bg-white hover:bg-zinc-50 cursor-pointer"
                       >
                         ⚡ 2da Quincena
                       </button>
@@ -4038,7 +4034,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-1.5 border-b border-brand-ink/10 pb-2">
                               <div>
                                 <span className="text-xs font-black font-mono text-brand-ink mr-2">{c.fecha}</span>
-                                <span className="text-[9px] bg-brand-ink text-white px-1.5 py-0.5 font-mono font-bold uppercase tracking-wider">
+                                <span className="text-[11px] bg-brand-ink text-white px-1.5 py-0.5 font-mono font-bold uppercase tracking-wider">
                                   Propinas: {formatCOP(dayTips)}
                                 </span>
                               </div>
@@ -4066,7 +4062,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                   >
                                     <span className="flex flex-col text-left">
                                       <span className="font-black">{name}</span>
-                                      <span className="text-[9px] text-[#FF5C35] font-black font-mono flex items-center">
+                                      <span className="text-[11px] text-[#FF5C35] font-black font-mono flex items-center">
                                         {formatCOP(memberShare)}
                                         {tipDistributionMode === "puntos" && (
                                           isAsistente ? (
@@ -4084,14 +4080,14 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                                   }
                                                 });
                                               }}
-                                              className="ml-1 text-[9px] bg-emerald-50 text-emerald-800 border border-emerald-300 font-mono font-black rounded px-1 py-0.5 outline-none cursor-pointer"
+                                              className="ml-1 text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-300 font-mono font-black rounded px-1 py-0.5 outline-none cursor-pointer"
                                               onClick={(e) => e.stopPropagation()}
                                             >
                                               <option value="TC">TC (1.3 pts)</option>
                                               <option value="MT">MT (1.0 pts)</option>
                                             </select>
                                           ) : (
-                                            <span className="text-[9px] bg-zinc-100 text-zinc-700 border border-zinc-300 ml-1 px-1 font-mono font-black uppercase rounded">
+                                            <span className="text-[11px] bg-zinc-100 text-zinc-700 border border-zinc-300 ml-1 px-1 font-mono font-black uppercase rounded">
                                               {config.puntos} pts
                                             </span>
                                           )
@@ -4119,11 +4115,11 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                               {addingPersonToDayId === c.id ? (
                                 <div className="p-3 bg-white border border-brand-ink space-y-2.5 max-w-xs animate-[scale_0.15s_ease-out]" onClick={(e) => e.stopPropagation()}>
                                   <div className="flex justify-between items-center border-b border-brand-ink/10 pb-1">
-                                    <span className="text-[9px] font-black uppercase text-brand-ink/60">Seleccionar del Equipo:</span>
+                                    <span className="text-[11px] font-black uppercase text-brand-ink/60">Seleccionar del Equipo:</span>
                                     <button 
                                       type="button" 
                                       onClick={() => { setAddingPersonToDayId(null); setNewPersonNameForDay(""); }}
-                                      className="text-brand-ink hover:text-red-600 font-bold text-[9px] uppercase cursor-pointer"
+                                      className="text-brand-ink hover:text-red-600 font-bold text-[11px] uppercase cursor-pointer"
                                     >
                                       Cerrar
                                     </button>
@@ -4143,18 +4139,18 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                             }));
                                             setAddingPersonToDayId(null);
                                           }}
-                                          className="text-[10px] font-bold bg-[#F5F2EB] hover:bg-brand-ink hover:text-white border border-brand-ink px-1.5 py-0.5 cursor-pointer transition-all rounded"
+                                          className="text-[11px] font-bold bg-[#F5F2EB] hover:bg-brand-ink hover:text-white border border-brand-ink px-1.5 py-0.5 cursor-pointer transition-all rounded"
                                         >
                                           + {m.nombre} ({m.puntosPropinas} pts)
                                         </button>
                                       ))}
                                     {teamMembers.filter(m => m.activo && m.aptoPropinas && !(team.includes(m.nombre))).length === 0 && (
-                                      <span className="text-[10px] text-zinc-400 italic">Todo el equipo apto asignado.</span>
+                                      <span className="text-[11px] text-zinc-400 italic">Todo el equipo apto asignado.</span>
                                     )}
                                   </div>
                                   
                                   <div className="border-t border-brand-ink/10 pt-2 space-y-1">
-                                    <span className="text-[9px] font-black uppercase text-brand-ink/60 block">O ingresar nombre manual:</span>
+                                    <span className="text-[11px] font-black uppercase text-brand-ink/60 block">O ingresar nombre manual:</span>
                                     <div className="flex items-center space-x-1">
                                       <input
                                         type="text"
@@ -4185,7 +4181,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                             setAddingPersonToDayId(null);
                                           }
                                         }}
-                                        className="bg-brand-ink text-white text-[10px] font-black px-2 py-1 uppercase h-7 cursor-pointer"
+                                        className="bg-brand-ink text-white text-[11px] font-black px-2 py-1 uppercase h-7 cursor-pointer"
                                       >
                                         OK
                                       </button>
@@ -4286,13 +4282,13 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                       <div className="space-y-4">
                         <div className="flex justify-between items-center bg-zinc-100 p-3.5 border-2 border-brand-ink">
                           <div>
-                            <span className="text-[10px] text-brand-ink/50 uppercase font-black tracking-wider block">Total Propinas Recaudadas</span>
+                            <span className="text-[11px] text-brand-ink/50 uppercase font-black tracking-wider block">Total Propinas Recaudadas</span>
                             <span className="text-lg font-black font-mono text-brand-ink">
                               {formatCOP(totalPeriodTips)}
                             </span>
                           </div>
                           <div className="text-right">
-                            <span className="text-[10px] text-brand-ink/50 uppercase font-black tracking-wider block">Personas Activas</span>
+                            <span className="text-[11px] text-brand-ink/50 uppercase font-black tracking-wider block">Personas Activas</span>
                             <span className="text-lg font-black font-mono text-brand-ink">{results.length}</span>
                           </div>
                         </div>
@@ -4302,9 +4298,9 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           <table className="w-full text-left border-collapse">
                             <thead>
                               <tr className="bg-brand-bg border-b-2 border-brand-ink">
-                                <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink w-1/3">Colaborador</th>
-                                <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink text-center">Días Trabajados</th>
-                                <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink text-right">Total a Pagar</th>
+                                <th className="py-2.5 px-3 text-[11px] font-black uppercase tracking-wider text-brand-ink w-1/3">Colaborador</th>
+                                <th className="py-2.5 px-3 text-[11px] font-black uppercase tracking-wider text-brand-ink text-center">Días Trabajados</th>
+                                <th className="py-2.5 px-3 text-[11px] font-black uppercase tracking-wider text-brand-ink text-right">Total a Pagar</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -4320,7 +4316,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                     <td className="py-2.5 px-3 font-sans font-bold text-brand-ink text-xs flex items-center">
                                       <span>{r.name}</span>
                                       {tipDistributionMode === "puntos" && (
-                                        <span className="text-[9px] bg-emerald-50 text-emerald-800 border border-emerald-300 ml-2 px-1 font-mono font-black uppercase rounded" title="Puntos del Rol">
+                                        <span className="text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-300 ml-2 px-1 font-mono font-black uppercase rounded" title="Puntos del Rol">
                                           {getMemberConfig(r.name).puntos} Pts
                                         </span>
                                       )}

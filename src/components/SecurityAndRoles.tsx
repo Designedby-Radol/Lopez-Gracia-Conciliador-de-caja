@@ -327,10 +327,10 @@ export default function SecurityAndRoles({
               <h1 className="text-xl font-black text-brand-ink uppercase tracking-tight">
                 Seguridad, Accesos & Roles
               </h1>
-              <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+              <span className="text-[11px] font-black uppercase px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
                 Sede {localName}
               </span>
-              <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-800 text-[10px] font-bold">
+              <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-800 text-[11px] font-bold">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -372,7 +372,7 @@ export default function SecurityAndRoles({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
           <div className="bg-zinc-50 border border-brand-ink/15 p-3 rounded-lg flex items-center justify-between">
             <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 block">Total Cuentas</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block">Total Cuentas</span>
               <span className="text-lg font-black text-brand-ink">{totalAccounts}</span>
             </div>
             <Key className="w-5 h-5 text-zinc-400" />
@@ -380,7 +380,7 @@ export default function SecurityAndRoles({
 
           <div className="bg-emerald-50/50 border border-emerald-200 p-3 rounded-lg flex items-center justify-between">
             <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block">Activas & Autorizadas</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 block">Activas & Autorizadas</span>
               <span className="text-lg font-black text-emerald-900">{activeAccounts}</span>
             </div>
             <UserCheck className="w-5 h-5 text-emerald-600" />
@@ -388,7 +388,7 @@ export default function SecurityAndRoles({
 
           <div className="bg-amber-50/50 border border-amber-200 p-3 rounded-lg flex items-center justify-between">
             <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 block">Suspendidas / Inactivas</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700 block">Suspendidas / Inactivas</span>
               <span className="text-lg font-black text-amber-900">{suspendedAccounts}</span>
             </div>
             <UserX className="w-5 h-5 text-amber-600" />
@@ -396,7 +396,7 @@ export default function SecurityAndRoles({
 
           <div className="bg-[#1E3E30]/5 border border-[#1E3E30]/20 p-3 rounded-lg flex items-center justify-between">
             <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#1E3E30] block">Tu Sesión Activa</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#1E3E30] block">Tu Sesión Activa</span>
               <span className="text-xs font-black text-[#1E3E30] truncate block max-w-[120px]">{currentUsername}</span>
             </div>
             <Shield className="w-5 h-5 text-[#1E3E30]" />
@@ -462,7 +462,7 @@ export default function SecurityAndRoles({
             <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <div className="flex items-center space-x-1 text-xs">
                 <Filter className="w-3.5 h-3.5 text-zinc-400" />
-                <span className="text-[10px] font-black uppercase text-zinc-500">Rol:</span>
+                <span className="text-[11px] font-black uppercase text-zinc-500">Rol:</span>
                 <select
                   value={roleFilter}
                   onChange={(e) => setRoleFilter(e.target.value)}
@@ -478,7 +478,7 @@ export default function SecurityAndRoles({
               </div>
 
               <div className="flex items-center space-x-1 text-xs">
-                <span className="text-[10px] font-black uppercase text-zinc-500">Estado:</span>
+                <span className="text-[11px] font-black uppercase text-zinc-500">Estado:</span>
                 <select
                   value={statusFilter}
                   onChange={(e: any) => setStatusFilter(e.target.value)}
@@ -497,7 +497,7 @@ export default function SecurityAndRoles({
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-[#1E3E30] text-white border-b-2 border-brand-ink text-[10px] font-black uppercase tracking-wider">
+                  <tr className="bg-[#1E3E30] text-white border-b-2 border-brand-ink text-[11px] font-black uppercase tracking-wider">
                     <th className="py-3 px-4">Usuario / Colaborador</th>
                     <th className="py-3 px-3">Cédula (Login ID)</th>
                     <th className="py-3 px-3">Rol de Sistema</th>
@@ -537,7 +537,7 @@ export default function SecurityAndRoles({
                                 <span className="font-black text-brand-ink block text-xs">
                                   {member.nombre}
                                 </span>
-                                <span className="text-[10px] font-semibold text-zinc-500">
+                                <span className="text-[11px] font-semibold text-zinc-500">
                                   {member.local || localName}
                                 </span>
                               </div>
@@ -568,7 +568,7 @@ export default function SecurityAndRoles({
                               <option value="Líder de pastelería">Líder de pastelería</option>
                               <option value="Auxiliar de pastelería">Auxiliar de pastelería</option>
                             </select>
-                            <span className={`inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded mt-1 border ${roleConfig.badgeColor}`}>
+                            <span className={`inline-block text-[11px] font-black uppercase px-2 py-0.5 rounded mt-1 border ${roleConfig.badgeColor}`}>
                               {roleConfig.title}
                             </span>
                           </td>
@@ -591,7 +591,7 @@ export default function SecurityAndRoles({
                           <td className="py-3 px-3 text-center">
                             <button
                               onClick={() => handleToggleUserStatus(member)}
-                              className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border transition-all cursor-pointer inline-flex items-center space-x-1 ${
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider border transition-all cursor-pointer inline-flex items-center space-x-1 ${
                                 !isSuspended
                                   ? "bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200"
                                   : "bg-red-100 text-red-800 border-red-300 hover:bg-red-200"
@@ -662,7 +662,7 @@ export default function SecurityAndRoles({
             <div className="border-2 border-brand-ink overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="bg-[#1E3E30] text-white border-b-2 border-brand-ink text-[10px] font-black uppercase tracking-wider">
+                  <tr className="bg-[#1E3E30] text-white border-b-2 border-brand-ink text-[11px] font-black uppercase tracking-wider">
                     <th className="py-3 px-4 w-1/3">Módulo y Acción del Sistema</th>
                     <th className="py-3 px-2 text-center bg-[#162e24]">Gerencia</th>
                     <th className="py-3 px-2 text-center">Líder Operador</th>
@@ -673,7 +673,7 @@ export default function SecurityAndRoles({
                 </thead>
                 <tbody className="divide-y divide-brand-ink/10 font-medium">
                   {/* Category: Cierres y Auditoría */}
-                  <tr className="bg-zinc-100 font-black text-[10px] uppercase tracking-wider text-zinc-600">
+                  <tr className="bg-zinc-100 font-black text-[11px] uppercase tracking-wider text-zinc-600">
                     <td colSpan={6} className="py-2 px-4">
                       Módulo 1: Cierres de Caja & Auditoría Financiera
                     </td>
@@ -681,7 +681,7 @@ export default function SecurityAndRoles({
                   <tr>
                     <td className="py-2.5 px-4">
                       <span className="font-bold block text-brand-ink">Auditar y Cuadrar Cierres de Caja</span>
-                      <span className="text-[10px] text-zinc-500">Conciliación con POS y asignación de descuadres</span>
+                      <span className="text-[11px] text-zinc-500">Conciliación con POS y asignación de descuadres</span>
                     </td>
                     <td className="text-center py-2 px-2 bg-emerald-50/50"><Check className="w-4 h-4 text-emerald-700 mx-auto" /></td>
                     <td className="text-center py-2 px-2"><X className="w-4 h-4 text-zinc-300 mx-auto" /></td>
@@ -692,7 +692,7 @@ export default function SecurityAndRoles({
                   <tr>
                     <td className="py-2.5 px-4">
                       <span className="font-bold block text-brand-ink">Registrar Arqueo Físico de Caja</span>
-                      <span className="text-[10px] text-zinc-500">Conteo de efectivo, datáfono, transferencias y propinas</span>
+                      <span className="text-[11px] text-zinc-500">Conteo de efectivo, datáfono, transferencias y propinas</span>
                     </td>
                     <td className="text-center py-2 px-2 bg-emerald-50/50"><Check className="w-4 h-4 text-emerald-700 mx-auto" /></td>
                     <td className="text-center py-2 px-2"><Check className="w-4 h-4 text-emerald-700 mx-auto" /></td>
@@ -702,7 +702,7 @@ export default function SecurityAndRoles({
                   </tr>
 
                   {/* Category: Nómina y Salarios */}
-                  <tr className="bg-zinc-100 font-black text-[10px] uppercase tracking-wider text-zinc-600">
+                  <tr className="bg-zinc-100 font-black text-[11px] uppercase tracking-wider text-zinc-600">
                     <td colSpan={6} className="py-2 px-4">
                       Módulo 2: Nómina, Salarios & Propinas (Confidencial)
                     </td>
@@ -710,7 +710,7 @@ export default function SecurityAndRoles({
                   <tr>
                     <td className="py-2.5 px-4">
                       <span className="font-bold block text-brand-ink">Ver Salarios & Liquidar Nómina Quincenal</span>
-                      <span className="text-[10px] text-zinc-500">Cálculo de turnos, horas extra, recargos y tirillas PDF</span>
+                      <span className="text-[11px] text-zinc-500">Cálculo de turnos, horas extra, recargos y tirillas PDF</span>
                     </td>
                     <td className="text-center py-2 px-2 bg-emerald-50/50"><Check className="w-4 h-4 text-emerald-700 mx-auto" /></td>
                     <td className="text-center py-2 px-2"><X className="w-4 h-4 text-zinc-300 mx-auto" /></td>
@@ -721,7 +721,7 @@ export default function SecurityAndRoles({
                   <tr>
                     <td className="py-2.5 px-4">
                       <span className="font-bold block text-brand-ink">Liquidación y Parámetros de Propinas</span>
-                      <span className="text-[10px] text-zinc-500">Reparto por puntos y políticas de elegibilidad</span>
+                      <span className="text-[11px] text-zinc-500">Reparto por puntos y políticas de elegibilidad</span>
                     </td>
                     <td className="text-center py-2 px-2 bg-emerald-50/50"><Check className="w-4 h-4 text-emerald-700 mx-auto" /></td>
                     <td className="text-center py-2 px-2"><Check className="w-4 h-4 text-emerald-700 mx-auto" /></td>
@@ -731,7 +731,7 @@ export default function SecurityAndRoles({
                   </tr>
 
                   {/* Category: Operación y Checklists */}
-                  <tr className="bg-zinc-100 font-black text-[10px] uppercase tracking-wider text-zinc-600">
+                  <tr className="bg-zinc-100 font-black text-[11px] uppercase tracking-wider text-zinc-600">
                     <td colSpan={6} className="py-2 px-4">
                       Módulo 3: Operación de Tienda & Checklists
                     </td>
@@ -739,7 +739,7 @@ export default function SecurityAndRoles({
                   <tr>
                     <td className="py-2.5 px-4">
                       <span className="font-bold block text-brand-ink">Completar Checklist de Apertura / Cierre</span>
-                      <span className="text-[10px] text-zinc-500">Supervisión diaria de limpieza, temperatura y caja</span>
+                      <span className="text-[11px] text-zinc-500">Supervisión diaria de limpieza, temperatura y caja</span>
                     </td>
                     <td className="text-center py-2 px-2 bg-emerald-50/50"><Check className="w-4 h-4 text-emerald-700 mx-auto" /></td>
                     <td className="text-center py-2 px-2"><Check className="w-4 h-4 text-emerald-700 mx-auto" /></td>
@@ -750,7 +750,7 @@ export default function SecurityAndRoles({
                   <tr>
                     <td className="py-2.5 px-4">
                       <span className="font-bold block text-brand-ink">Inventario de Mercancía & Producción</span>
-                      <span className="text-[10px] text-zinc-500">Conteo físico de existencias y registro de mermas</span>
+                      <span className="text-[11px] text-zinc-500">Conteo físico de existencias y registro de mermas</span>
                     </td>
                     <td className="text-center py-2 px-2 bg-emerald-50/50"><Check className="w-4 h-4 text-emerald-700 mx-auto" /></td>
                     <td className="text-center py-2 px-2"><Check className="w-4 h-4 text-emerald-700 mx-auto" /></td>
@@ -760,7 +760,7 @@ export default function SecurityAndRoles({
                   </tr>
 
                   {/* Category: Seguridad y Accesos */}
-                  <tr className="bg-zinc-100 font-black text-[10px] uppercase tracking-wider text-zinc-600">
+                  <tr className="bg-zinc-100 font-black text-[11px] uppercase tracking-wider text-zinc-600">
                     <td colSpan={6} className="py-2 px-4">
                       Módulo 4: Seguridad, Cuentas & Permisos
                     </td>
@@ -768,7 +768,7 @@ export default function SecurityAndRoles({
                   <tr>
                     <td className="py-2.5 px-4">
                       <span className="font-bold block text-brand-ink">Administrar Cuentas, Contraseñas y Roles</span>
-                      <span className="text-[10px] text-zinc-500">Crear usuarios, resetear contraseñas y revocar accesos</span>
+                      <span className="text-[11px] text-zinc-500">Crear usuarios, resetear contraseñas y revocar accesos</span>
                     </td>
                     <td className="text-center py-2 px-2 bg-emerald-50/50"><Check className="w-4 h-4 text-emerald-700 mx-auto" /></td>
                     <td className="text-center py-2 px-2"><X className="w-4 h-4 text-zinc-300 mx-auto" /></td>
@@ -881,7 +881,7 @@ export default function SecurityAndRoles({
 
               <div className="flex items-center space-x-2 w-full sm:w-auto">
                 <Filter className="w-3.5 h-3.5 text-zinc-400" />
-                <span className="text-[10px] font-black uppercase text-zinc-500">Tipo Evento:</span>
+                <span className="text-[11px] font-black uppercase text-zinc-500">Tipo Evento:</span>
                 <select
                   value={auditFilterAction}
                   onChange={(e) => setAuditFilterAction(e.target.value)}
@@ -901,7 +901,7 @@ export default function SecurityAndRoles({
             <div className="border-2 border-brand-ink overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="bg-[#1E3E30] text-white border-b-2 border-brand-ink text-[10px] font-black uppercase tracking-wider">
+                  <tr className="bg-[#1E3E30] text-white border-b-2 border-brand-ink text-[11px] font-black uppercase tracking-wider">
                     <th className="py-2.5 px-3">Fecha / Hora</th>
                     <th className="py-2.5 px-3">Evento</th>
                     <th className="py-2.5 px-3">Estado</th>
@@ -928,12 +928,12 @@ export default function SecurityAndRoles({
                             {new Date(log.timestamp).toLocaleString("es-CO")}
                           </td>
                           <td className="py-2.5 px-3 whitespace-nowrap">
-                            <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-zinc-100 text-zinc-800 border border-zinc-300">
+                            <span className="text-[11px] font-black uppercase px-2 py-0.5 rounded bg-zinc-100 text-zinc-800 border border-zinc-300">
                               {log.action}
                             </span>
                           </td>
                           <td className="py-2.5 px-3 whitespace-nowrap">
-                            <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded border ${
+                            <span className={`text-[11px] font-black uppercase px-2 py-0.5 rounded border ${
                               isError
                                 ? "bg-red-100 text-red-800 border-red-300"
                                 : isWarning
@@ -983,13 +983,13 @@ export default function SecurityAndRoles({
             </div>
 
             <div className="bg-zinc-50 p-3 rounded-lg border border-brand-ink/10 space-y-1 text-xs">
-              <span className="text-zinc-500 font-bold block text-[10px] uppercase">Usuario:</span>
+              <span className="text-zinc-500 font-bold block text-[11px] uppercase">Usuario:</span>
               <span className="font-black text-brand-ink block text-sm">{selectedUserForPassword.nombre}</span>
               <span className="font-mono text-zinc-600 text-xs">C.C. {selectedUserForPassword.cedula || "No asignada"}</span>
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink block">
+              <label className="text-[11px] font-black uppercase tracking-wider text-brand-ink block">
                 Clave temporal (el colaborador deberá cambiarla al ingresar):
               </label>
               <div className="relative">
@@ -1071,7 +1071,7 @@ export default function SecurityAndRoles({
 
             <form onSubmit={handleCreateNewUser} className="space-y-4">
               <div className="space-y-1">
-                <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink block">
+                <label className="text-[11px] font-black uppercase tracking-wider text-brand-ink block">
                   Nombre Completo del Colaborador
                 </label>
                 <input
@@ -1086,7 +1086,7 @@ export default function SecurityAndRoles({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink block">
+                  <label className="text-[11px] font-black uppercase tracking-wider text-brand-ink block">
                     Cédula (Login ID)
                   </label>
                   <input
@@ -1100,7 +1100,7 @@ export default function SecurityAndRoles({
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink block">
+                  <label className="text-[11px] font-black uppercase tracking-wider text-brand-ink block">
                     Contraseña Inicial
                   </label>
                   <input
@@ -1115,7 +1115,7 @@ export default function SecurityAndRoles({
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink block">
+                <label className="text-[11px] font-black uppercase tracking-wider text-brand-ink block">
                   Rol de Sistema & Nivel de Permisos
                 </label>
                 <select
@@ -1132,7 +1132,7 @@ export default function SecurityAndRoles({
               </div>
 
               <div className="bg-zinc-50 border border-brand-ink/10 p-3 rounded text-[11px] text-zinc-600 space-y-1">
-                <span className="font-bold text-brand-ink uppercase text-[10px] block">Detalles de la Creación:</span>
+                <span className="font-bold text-brand-ink uppercase text-[11px] block">Detalles de la Creación:</span>
                 <p>
                   Esta cuenta quedará inmediatamente habilitada para iniciar sesión con su número de cédula y la contraseña configurada. Además, creará su ficha laboral sincronizada en el módulo de Perfiles & Nómina.
                 </p>

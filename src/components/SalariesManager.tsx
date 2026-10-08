@@ -37,10 +37,6 @@ import {
   Sliders,
   Copy
 } from "lucide-react";
-import { jsPDF } from "jspdf";
-import * as pdfjsLib from "pdfjs-dist";
-// @ts-ignore
-import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { 
   checkColombianHolidayOrSunday, 
   matchEmployeeName, 
@@ -53,9 +49,9 @@ import {
   generatePayrollTirillaJson
 } from "../utils/colombianPayroll";
 import { dbAdapter } from "../db/dbAdapter";
+import { loadPdfjs, loadJsPDF } from "../lib/lazyLibs";
 
 // Set up PDF worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 export const formatNumberWithDots = (val: number | string | undefined | null): string => {
   if (val === undefined || val === null || val === "" || isNaN(Number(val))) return "0";
@@ -713,10 +709,10 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
       if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls") || fileName.endsWith(".csv")) {
         setPdfUploadNote("Interpretando hoja de cálculo POS Excel (filas, columnas A, D, H, N, O y cédula)...");
-        posParsedMap = parsePosExcelFile(arrayBuffer, teamMembers);
+        posParsedMap = await parsePosExcelFile(arrayBuffer, teamMembers);
       } else {
         setPdfUploadNote("Interpretando documento PDF POS...");
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const pdf = await (await loadPdfjs()).getDocument({ data: arrayBuffer }).promise;
         const pageTexts: string[] = [];
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
@@ -971,13 +967,13 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
   };
 
   // EXPORTAR COMPROBANTE INDIVIDUAL EN PDF (SIN CAMPO DE FIRMA)
-  const handleExportIndividualPdf = (memberName: string) => {
+  const handleExportIndividualPdf = async (memberName: string) => {
     const member = teamMembers.find(m => m.nombre === memberName) || { nombre: memberName };
     const config = getEmployeeConfig(member);
     const novs = getNovedades(memberName);
     const calc = calculateQuincena(config, novs);
 
-    const doc = new jsPDF({
+    const doc = new (await loadJsPDF())({
       orientation: "portrait",
       unit: "mm",
       format: "a4"
@@ -1356,7 +1352,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
             <Calendar className="w-5 h-5" />
           </div>
           <div>
-            <span className="text-[10px] font-black uppercase tracking-wider text-brand-ink/50 block">Período de Nómina Seleccionado</span>
+            <span className="text-[11px] font-black uppercase tracking-wider text-brand-ink/50 block">Período de Nómina Seleccionado</span>
             <div className="flex flex-wrap items-center gap-2 mt-0.5">
               <input
                 type="text"
@@ -1402,31 +1398,31 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
           </h4>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-emerald-900">
             <div className="bg-white p-3 rounded-xl border border-emerald-200 space-y-1">
-              <span className="font-bold block text-[10px] text-emerald-700 uppercase">SMMLV 2026 Mensual</span>
+              <span className="font-bold block text-[11px] text-emerald-700 uppercase">SMMLV 2026 Mensual</span>
               <MoneyInput
                 value={smmlvBase}
                 onChange={(val) => handleUpdateSmmlvGlobal(val, auxTransporteBase)}
                 className="w-full bg-emerald-50/50 border border-emerald-300 p-1 font-mono font-black text-sm rounded outline-none"
               />
-              <span className="text-[10px] text-emerald-700 font-bold block">
+              <span className="text-[11px] text-emerald-700 font-bold block">
                 $ {formatNumberWithDots(smmlvBase)} COP / mes
               </span>
             </div>
             <div className="bg-white p-3 rounded-xl border border-emerald-200 space-y-1">
-              <span className="font-bold block text-[10px] text-emerald-700 uppercase">Auxilio de Transporte Mensual</span>
+              <span className="font-bold block text-[11px] text-emerald-700 uppercase">Auxilio de Transporte Mensual</span>
               <MoneyInput
                 value={auxTransporteBase}
                 onChange={(val) => handleUpdateSmmlvGlobal(smmlvBase, val)}
                 className="w-full bg-emerald-50/50 border border-emerald-300 p-1 font-mono font-black text-sm rounded outline-none"
               />
-              <span className="text-[10px] text-emerald-700 font-bold block">
+              <span className="text-[11px] text-emerald-700 font-bold block">
                 $ {formatNumberWithDots(auxTransporteBase)} COP (${formatNumberWithDots(Math.round(auxTransporteBase / 30))}/día)
               </span>
             </div>
             <div className="bg-white p-3 rounded-xl border border-emerald-200 space-y-1">
-              <span className="font-bold block text-[10px] text-emerald-700 uppercase">Jornada Semanal</span>
+              <span className="font-bold block text-[11px] text-emerald-700 uppercase">Jornada Semanal</span>
               <span className="font-black text-sm block pt-1">{divisorHorasMes(fechaFin) / 5} Horas Semanales</span>
-              <span className="text-[10px] text-emerald-700 font-bold block">(Divisor {divisorHorasMes(fechaFin)} hrs/mes)</span>
+              <span className="text-[11px] text-emerald-700 font-bold block">(Divisor {divisorHorasMes(fechaFin)} hrs/mes)</span>
             </div>
           </div>
         </div>
@@ -1445,7 +1441,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                 <div>
                   <h3 className="text-sm font-black text-brand-ink uppercase tracking-wider flex items-center gap-2">
                     <span>Cargar Reporte de Asistencia POS (Excel .xlsx / .csv)</span>
-                    <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] px-2 py-0.5 rounded font-black">2026 Norma CST</span>
+                    <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] px-2 py-0.5 rounded font-black">2026 Norma CST</span>
                   </h3>
                   <p className="text-xs text-zinc-600">
                     Sube la hoja de cálculo exportada por el sistema POS. Columnas automáticas: A (Cédula), D (Nombres), H (Apellidos), N (Entrada), O (Salida).
@@ -1512,7 +1508,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       <span className="font-black text-amber-950">
                         * Colaborador: <span className="text-brand-ink underline">{alertItem.colaborador}</span>
                       </span>
-                      <span className="bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded text-[10px]">
+                      <span className="bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded text-[11px]">
                         * Días con marcación en Excel: {alertItem.diasMarcacion} de {alertItem.diasEsperados} esperados
                       </span>
                     </div>
@@ -1546,7 +1542,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Lista Lateral de Integrantes */}
             <div className="lg:col-span-1 bg-white border-2 border-brand-ink rounded-2xl shadow-[4px_4px_0px_0px_#1C1917] p-4 space-y-3">
-              <span className="text-[10px] font-black uppercase text-brand-ink/50 block tracking-wider">
+              <span className="text-[11px] font-black uppercase text-brand-ink/50 block tracking-wider">
                 Selecciona Colaborador para Revisar
               </span>
 
@@ -1569,7 +1565,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                     >
                       <div>
                         <span className="font-black text-xs block leading-tight">{member.nombre}</span>
-                        <div className="flex items-center space-x-1.5 mt-1 text-[9.5px]">
+                        <div className="flex items-center space-x-1.5 mt-1 text-[11px]">
                           <span className={`px-1.5 py-0.5 rounded font-bold uppercase ${
                             isSelected ? "bg-white/20 text-white" : "bg-emerald-100 text-emerald-800"
                           }`}>
@@ -1615,7 +1611,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                               C.C. {config.cedula || member.cedula}
                             </span>
                           )}
-                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-black uppercase rounded">
+                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] font-black uppercase rounded">
                             {config.area}
                           </span>
                         </div>
@@ -1658,7 +1654,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       {/* Devengados */}
                       <div className="bg-emerald-50/60 border border-emerald-300 p-4 rounded-xl space-y-2">
-                        <span className="text-[10px] font-black uppercase text-emerald-900 tracking-wider block border-b border-emerald-200 pb-1">
+                        <span className="text-[11px] font-black uppercase text-emerald-900 tracking-wider block border-b border-emerald-200 pb-1">
                           🟢 Devengados (Ingresos)
                         </span>
 
@@ -1712,7 +1708,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
                       {/* Deducciones */}
                       <div className="bg-red-50/60 border border-red-200 p-4 rounded-xl space-y-2">
-                        <span className="text-[10px] font-black uppercase text-red-900 tracking-wider block border-b border-red-200 pb-1">
+                        <span className="text-[11px] font-black uppercase text-red-900 tracking-wider block border-b border-red-200 pb-1">
                           🔴 Deducciones (Descuentos)
                         </span>
 
@@ -1744,18 +1740,18 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       {/* Neto a Pagar */}
                       <div className="bg-brand-ink text-white p-4 rounded-xl space-y-3 flex flex-col justify-between shadow-md">
                         <div>
-                          <span className="text-[10px] font-black uppercase text-emerald-400 tracking-wider block mb-1">
+                          <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider block mb-1">
                             💰 Neto a Pagar (Quincena)
                           </span>
                           <span className="text-2xl font-black font-mono block text-white mt-1">
                             {formatCOP(calc.netoAPagar)}
                           </span>
-                          <span className="text-[10px] text-zinc-300 font-medium block mt-1">
+                          <span className="text-[11px] text-zinc-300 font-medium block mt-1">
                             Días efectivamente asistidos: {calc.diasAsistidosEfectivos} de {calc.diasLaboradosTotales} días.
                           </span>
                         </div>
 
-                        <div className="pt-2 border-t border-white/10 text-[10px] text-zinc-400 space-y-0.5">
+                        <div className="pt-2 border-t border-white/10 text-[11px] text-zinc-400 space-y-0.5">
                           <div>Valor hora ordinaria: ${Math.round(calc.valorHoraOrdinaria).toLocaleString("es-CO")} COP</div>
                           <div>Aux. transp. diario: ${Math.round(calc.auxDiarioTransporte).toLocaleString("es-CO")} COP</div>
                         </div>
@@ -1772,7 +1768,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         {config.tipoContrato === "Por días" ? (
                           <>
                             <div>
-                              <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Días Tiempo Completo (7h)</label>
+                              <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Días Tiempo Completo (7h)</label>
                               <input
                                 type="number"
                                 value={novs.diasTiempoCompleto}
@@ -1781,7 +1777,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                               />
                             </div>
                             <div>
-                              <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Días Medio Tiempo (5.5h)</label>
+                              <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Días Medio Tiempo (5.5h)</label>
                               <input
                                 type="number"
                                 value={novs.diasMedioTiempo}
@@ -1793,7 +1789,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         ) : (
                           <>
                             <div>
-                              <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Días Laborados Quincena</label>
+                              <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Días Laborados Quincena</label>
                               <input
                                 type="number"
                                 value={novs.diasLaboradosQuincena}
@@ -1802,7 +1798,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                               />
                             </div>
                             <div>
-                              <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Días Asistidos Transporte</label>
+                              <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Días Asistidos Transporte</label>
                               <input
                                 type="number"
                                 value={novs.diasAsistidosTransporte}
@@ -1814,7 +1810,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         )}
 
                         <div>
-                          <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Horas Extra Diurnas</label>
+                          <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Horas Extra Diurnas</label>
                           <input
                             type="number"
                             value={novs.horasExtraDiurnas}
@@ -1824,7 +1820,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Horas Dominicales</label>
+                          <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Horas Dominicales</label>
                           <input
                             type="number"
                             value={novs.recargosDominicales}
@@ -1834,25 +1830,25 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Bono Adicional Quincenal (COP)</label>
+                          <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Bono Adicional Quincenal (COP)</label>
                           <MoneyInput
                             value={novs.bonoNoSalarial || 0}
                             onChange={(val) => updateNovedades(selectedMemberName, "bonoNoSalarial", val)}
                             className="w-full bg-white border border-zinc-300 p-1.5 font-mono font-bold text-xs rounded outline-none"
                           />
-                          <span className="text-[9px] text-zinc-500 font-bold block mt-0.5">
+                          <span className="text-[11px] text-zinc-500 font-bold block mt-0.5">
                             $ {formatNumberWithDots(novs.bonoNoSalarial || 0)} COP
                           </span>
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Deducción / Descuento (COP)</label>
+                          <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Deducción / Descuento (COP)</label>
                           <MoneyInput
                             value={novs.deduccionesAdicionales || 0}
                             onChange={(val) => updateNovedades(selectedMemberName, "deduccionesAdicionales", val)}
                             className="w-full bg-white border border-zinc-300 p-1.5 font-mono font-bold text-xs rounded outline-none"
                           />
-                          <span className="text-[9px] text-zinc-500 font-bold block mt-0.5">
+                          <span className="text-[11px] text-zinc-500 font-bold block mt-0.5">
                             $ {formatNumberWithDots(novs.deduccionesAdicionales || 0)} COP
                           </span>
                         </div>
@@ -1869,14 +1865,14 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                               Detalle de Marcas de Reloj y Asistencia POS (Quincena)
                             </h4>
                           </div>
-                          <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
+                          <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
                             {novs.attendanceRecords.length} Días Evaluados
                           </span>
                         </div>
 
                         <div className="overflow-x-auto">
                           <table className="w-full text-left text-[11px]">
-                            <thead className="bg-zinc-100 text-zinc-700 font-black uppercase text-[9px] border-b border-zinc-200">
+                            <thead className="bg-zinc-100 text-zinc-700 font-black uppercase text-[11px] border-b border-zinc-200">
                               <tr>
                                 <th className="p-2">Fecha / Día</th>
                                 <th className="p-2">Horario Pactado</th>
@@ -1892,9 +1888,9 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                                 <tr key={idx} className={rec.isDomingoOFestivo ? "bg-amber-50/60 font-semibold" : "hover:bg-zinc-50"}>
                                   <td className="p-2 whitespace-nowrap">
                                     <div className="font-bold text-zinc-900">{rec.fecha}</div>
-                                    <div className="text-[9px] text-zinc-500">{rec.diaSemana}</div>
+                                    <div className="text-[11px] text-zinc-500">{rec.diaSemana}</div>
                                     {rec.isDomingoOFestivo && (
-                                      <span className="text-[8px] bg-amber-200 text-amber-900 px-1 py-0.2 rounded font-black uppercase inline-block mt-0.5">
+                                      <span className="text-[11px] bg-amber-200 text-amber-900 px-1 py-0.2 rounded font-black uppercase inline-block mt-0.5">
                                         +90% Dominical/Festivo
                                       </span>
                                     )}
@@ -1905,7 +1901,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                                   <td className="p-2 font-mono text-zinc-900 whitespace-nowrap">
                                     {rec.horaIngreso}
                                     {rec.llegadaAntesIgnoradaMinutos ? (
-                                      <span className="text-[8px] text-zinc-500 block">
+                                      <span className="text-[11px] text-zinc-500 block">
                                         ({rec.llegadaAntesIgnoradaMinutos} min antes - no suma)
                                       </span>
                                     ) : null}
@@ -1927,7 +1923,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                                       <span className="text-zinc-400">0 min</span>
                                     )}
                                   </td>
-                                  <td className="p-2 text-zinc-600 text-[10px]">
+                                  <td className="p-2 text-zinc-600 text-[11px]">
                                     {rec.observacion}
                                   </td>
                                 </tr>
@@ -1984,12 +1980,12 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                   Ficha Técnica y Gestión de Equipo
                 </h3>
                 {isAdmin ? (
-                  <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase rounded-full flex items-center space-x-1">
+                  <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-[11px] font-black uppercase rounded-full flex items-center space-x-1">
                     <Unlock className="w-3 h-3" />
                     <span>Modo Edición Admin</span>
                   </span>
                 ) : (
-                  <span className="px-2.5 py-0.5 bg-amber-100 text-amber-900 text-[10px] font-black uppercase rounded-full flex items-center space-x-1">
+                  <span className="px-2.5 py-0.5 bg-amber-100 text-amber-900 text-[11px] font-black uppercase rounded-full flex items-center space-x-1">
                     <Lock className="w-3 h-3" />
                     <span>Solo Administrador (Solo Lectura)</span>
                   </span>
@@ -2061,7 +2057,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 text-xs">
                       <div>
-                        <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                        <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                           Número de Cédula (C.C.)
                         </label>
                         <input
@@ -2075,7 +2071,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       </div>
 
                       <div>
-                        <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                        <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                           Salario Base Mensual (COP)
                         </label>
                         <div className="flex space-x-1.5">
@@ -2090,7 +2086,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                             <button
                               onClick={() => updateConfig(member.nombre, "salarioBaseMensual", smmlvBase)}
                               title="Asignar Salario Mínimo Legal Vigente"
-                              className="px-2 bg-zinc-200 hover:bg-zinc-300 text-brand-ink text-[9px] font-black uppercase rounded-lg shrink-0 cursor-pointer"
+                              className="px-2 bg-zinc-200 hover:bg-zinc-300 text-brand-ink text-[11px] font-black uppercase rounded-lg shrink-0 cursor-pointer"
                             >
                               SMMLV
                             </button>
@@ -2099,7 +2095,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       </div>
 
                       <div>
-                        <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                        <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                           Tipo de Contrato
                         </label>
                         <select
@@ -2114,7 +2110,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       </div>
 
                       <div>
-                        <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                        <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                           Asignación de Rol
                         </label>
                         <select
@@ -2131,7 +2127,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       </div>
 
                       <div>
-                        <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                        <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                           Puntaje de Propinas
                         </label>
                         <input
@@ -2157,7 +2153,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       {isAdmin && (
                         <button
                           onClick={() => handleAddBonus(member.nombre)}
-                          className="px-3 py-1 bg-emerald-700 text-white hover:bg-emerald-800 text-[10px] font-black uppercase rounded-lg flex items-center space-x-1 cursor-pointer"
+                          className="px-3 py-1 bg-emerald-700 text-white hover:bg-emerald-800 text-[11px] font-black uppercase rounded-lg flex items-center space-x-1 cursor-pointer"
                         >
                           <Plus className="w-3 h-3" />
                           <span>Agregar Bono</span>
@@ -2172,7 +2168,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         {bonosList.map((bono) => (
                           <div key={bono.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center bg-zinc-50 p-2.5 rounded-lg border border-zinc-200 text-xs">
                             <div className="sm:col-span-5">
-                              <label className="text-[9px] font-bold text-zinc-500 uppercase block">Concepto / Nombre del Bono</label>
+                              <label className="text-[11px] font-bold text-zinc-500 uppercase block">Concepto / Nombre del Bono</label>
                               <input
                                 type="text"
                                 disabled={!isAdmin}
@@ -2183,7 +2179,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                             </div>
 
                             <div className="sm:col-span-3">
-                              <label className="text-[9px] font-bold text-zinc-500 uppercase block">Monto (COP)</label>
+                              <label className="text-[11px] font-bold text-zinc-500 uppercase block">Monto (COP)</label>
                               <input
                                 type="number"
                                 disabled={!isAdmin}
@@ -2194,7 +2190,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                             </div>
 
                             <div className="sm:col-span-3">
-                              <label className="text-[9px] font-bold text-zinc-500 uppercase block">Tipología de Ley</label>
+                              <label className="text-[11px] font-bold text-zinc-500 uppercase block">Tipología de Ley</label>
                               <select
                                 disabled={!isAdmin}
                                 value={bono.tipologia}
@@ -2231,7 +2227,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         <Info className="w-3.5 h-3.5 text-emerald-700 inline" />
                         <span>Resumen de afectación de Ley para bonos:</span>
                       </p>
-                      <ul className="list-disc list-inside space-y-0.5 text-[10px] text-emerald-800">
+                      <ul className="list-disc list-inside space-y-0.5 text-[11px] text-emerald-800">
                         <li><strong>Bonos Salariales:</strong> Incrementan la Base de Cotización (IBC) e incrementan los aportes de Salud (4%) y Pensión (4%).</li>
                         <li><strong>Bonos No Salariales:</strong> Se pagan directamente en el devengado total sin generar retención ni retenciones de aportes de ley.</li>
                       </ul>
@@ -2248,7 +2244,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
                       {/* CONTADOR DE HORAS SEMANALES EN TIEMPO REAL */}
                       <div className="flex items-center space-x-2">
-                        <span className="text-[10px] font-black uppercase text-zinc-500">Carga Semanal:</span>
+                        <span className="text-[11px] font-black uppercase text-zinc-500">Carga Semanal:</span>
                         {weeklyHours <= 42 ? (
                           <span className="px-2.5 py-1 bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-black rounded-lg flex items-center space-x-1">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
@@ -2265,7 +2261,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center bg-zinc-50 p-3 rounded-lg border border-zinc-200 text-xs">
                       <div>
-                        <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                        <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                           Día de Descanso Estipulado en Contrato
                         </label>
                         <select
@@ -2288,7 +2284,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         </select>
                       </div>
 
-                      <div className="text-[10px] text-zinc-600 leading-snug">
+                      <div className="text-[11px] text-zinc-600 leading-snug">
                         <strong className="text-zinc-800">Lógica de Recargo Dominical:</strong> Si labora un domingo pero su descanso contractual es p. ej. <em>Martes</em>, el domingo se liquida como ordinario (+0%). Si labora en su día de descanso estipulado o festivo, aplica el incremento legal del +90%.
                       </div>
                     </div>
@@ -2297,7 +2293,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                     <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse text-xs">
                         <thead>
-                          <tr className="bg-zinc-100 border-b border-zinc-200 text-[10px] font-black text-zinc-600 uppercase">
+                          <tr className="bg-zinc-100 border-b border-zinc-200 text-[11px] font-black text-zinc-600 uppercase">
                             <th className="p-2">Día</th>
                             <th className="p-2">Labora</th>
                             <th className="p-2">Hora Entrada</th>
@@ -2313,7 +2309,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                                 <td className="p-2 font-bold text-brand-ink flex items-center space-x-1.5">
                                   <span>{day.dia}</span>
                                   {isRestDay && (
-                                    <span className="text-[9px] bg-amber-200 text-amber-900 font-black px-1.5 py-0.5 rounded">
+                                    <span className="text-[11px] bg-amber-200 text-amber-900 font-black px-1.5 py-0.5 rounded">
                                       Descanso
                                     </span>
                                   )}
@@ -2359,13 +2355,13 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                   {/* BLOQUE 4: INFORMACION PARTICULAR LIBRE & IA */}
                   <div className="bg-white border border-zinc-200 p-4 rounded-xl space-y-2">
                     <div className="flex items-center justify-between">
-                      <label className="text-[10px] font-black uppercase text-zinc-700 tracking-wider">
+                      <label className="text-[11px] font-black uppercase text-zinc-700 tracking-wider">
                         4. Información Particular / Condiciones Especiales (Texto Libre)
                       </label>
 
                       <button
                         onClick={() => parseInformacionParticular(member.nombre)}
-                        className="text-[10px] font-black text-emerald-700 hover:text-emerald-900 flex items-center space-x-1 cursor-pointer"
+                        className="text-[11px] font-black text-emerald-700 hover:text-emerald-900 flex items-center space-x-1 cursor-pointer"
                       >
                         <Bot className="w-3.5 h-3.5" />
                         <span>🤖 Extraer Reglas con IA</span>
@@ -2440,7 +2436,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                  <tr className="bg-zinc-100 border-b border-zinc-300 text-[10px] font-black uppercase text-zinc-600">
+                  <tr className="bg-zinc-100 border-b border-zinc-300 text-[11px] font-black uppercase text-zinc-600">
                     <th className="p-3">Periodo / Quincena</th>
                     <th className="p-3">Colaborador</th>
                     <th className="p-3">Cargo / Área</th>
@@ -2456,21 +2452,21 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                     <tr key={record.id} className="hover:bg-zinc-50 transition-colors">
                       <td className="p-3 font-bold text-brand-ink">
                         {record.quincenaNombre}
-                        <span className="block text-[9px] text-zinc-400 font-normal">
+                        <span className="block text-[11px] text-zinc-400 font-normal">
                           {new Date(record.fechaRegistro).toLocaleDateString("es-CO")}
                         </span>
                       </td>
 
                       <td className="p-3 font-black text-brand-ink">
                         {record.empleadoNombre}
-                        <span className="block text-[9px] text-zinc-500 font-normal">
+                        <span className="block text-[11px] text-zinc-500 font-normal">
                           Contrato: {record.tipoContrato}
                         </span>
                       </td>
 
                       <td className="p-3">
                         {record.cargo}
-                        <span className="inline-block ml-1 px-1.5 py-0.2 bg-zinc-200 text-zinc-800 text-[9px] rounded font-bold uppercase">
+                        <span className="inline-block ml-1 px-1.5 py-0.2 bg-zinc-200 text-zinc-800 text-[11px] rounded font-bold uppercase">
                           {record.area}
                         </span>
                       </td>
@@ -2493,7 +2489,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         <div className="flex items-center justify-center space-x-1">
                           <button
                             onClick={() => handleExportIndividualPdf(record.empleadoNombre)}
-                            className="p-1.5 bg-brand-ink text-white hover:bg-black rounded-lg text-[10px] font-black uppercase flex items-center space-x-1 cursor-pointer"
+                            className="p-1.5 bg-brand-ink text-white hover:bg-black rounded-lg text-[11px] font-black uppercase flex items-center space-x-1 cursor-pointer"
                             title="Descargar Comprobante PDF"
                           >
                             <Download className="w-3.5 h-3.5" />

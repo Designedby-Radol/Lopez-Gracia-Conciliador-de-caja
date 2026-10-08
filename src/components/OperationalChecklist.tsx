@@ -745,7 +745,7 @@ export default function OperationalChecklist({
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-white/80 border border-current/20">
+                <span className="text-[11px] font-black uppercase px-2 py-0.5 rounded-md bg-white/80 border border-current/20">
                   1:30 PM • Recordatorio de Turno
                 </span>
                 <span className="text-xs font-semibold text-slate-600">Hora actual: {currentTimeStr}</span>
@@ -988,7 +988,7 @@ export default function OperationalChecklist({
 
               {/* Score indicator */}
               <div className="bg-slate-900 text-white p-3.5 rounded-xl text-center shadow-xs">
-                <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase block">
+                <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase block">
                   Cumplimiento Operativo
                 </span>
                 <span className={`text-2xl font-extrabold font-numeric block ${
@@ -996,7 +996,7 @@ export default function OperationalChecklist({
                 }`}>
                   {porcentaje}%
                 </span>
-                <span className="text-[10px] block text-slate-400 font-medium mt-0.5">
+                <span className="text-[11px] block text-slate-400 font-medium mt-0.5">
                   {cumplidos} de {evaluables} cumplidos {sinEvaluar > 0 ? `(${sinEvaluar} sin evaluar)` : ""}
                 </span>
               </div>
@@ -1084,12 +1084,12 @@ export default function OperationalChecklist({
                     <span className="text-xs font-black uppercase text-slate-800">1. Apertura</span>
                   </div>
                   {isAperturaComplete ? (
-                    <span className="inline-flex items-center space-x-1 text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-300">
+                    <span className="inline-flex items-center space-x-1 text-[11px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-300">
                       <Check className="w-3 h-3" />
                       <span>Listo ({aperturaEvaluadas}/{aperturaTasks.length})</span>
                     </span>
                   ) : (
-                    <span className="text-[10px] font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md border border-amber-200">
+                    <span className="text-[11px] font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md border border-amber-200">
                       {aperturaEvaluadas}/{aperturaTasks.length} Evaluadas
                     </span>
                   )}
@@ -1098,7 +1098,7 @@ export default function OperationalChecklist({
                   {isAperturaComplete ? "Completado correctamente. Habilita el turno de la tarde." : "Higiene, neveras, vitrina, POS, apps e inventario."}
                 </p>
                 {currentPhase === "apertura" && viewMode === "stepped" && (
-                  <div className="mt-2 text-[10px] font-black text-amber-800 uppercase tracking-wider flex items-center space-x-1">
+                  <div className="mt-2 text-[11px] font-black text-amber-800 uppercase tracking-wider flex items-center space-x-1">
                     <span>● Editando esta sección</span>
                   </div>
                 )}
@@ -1137,17 +1137,17 @@ export default function OperationalChecklist({
                     <span className="text-xs font-black uppercase text-slate-800">2. Tarde</span>
                   </div>
                   {!isTurnoUnlocked ? (
-                    <span className="inline-flex items-center space-x-1 text-[10px] font-bold bg-slate-200 text-slate-600 px-2 py-0.5 rounded-md">
+                    <span className="inline-flex items-center space-x-1 text-[11px] font-bold bg-slate-200 text-slate-600 px-2 py-0.5 rounded-md">
                       <Lock className="w-2.5 h-2.5" />
                       <span>Bloqueado</span>
                     </span>
                   ) : isTurnoComplete ? (
-                    <span className="inline-flex items-center space-x-1 text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-300">
+                    <span className="inline-flex items-center space-x-1 text-[11px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-300">
                       <Check className="w-3 h-3" />
                       <span>Listo ({turnoEvaluadas}/{turnoTasks.length})</span>
                     </span>
                   ) : (
-                    <span className="text-[10px] font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md border border-amber-200">
+                    <span className="text-[11px] font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md border border-amber-200">
                       {turnoEvaluadas}/{turnoTasks.length} Evaluadas
                     </span>
                   )}
@@ -1160,7 +1160,7 @@ export default function OperationalChecklist({
                     : "Traslados, gramajes, aseo de salón y tareas asignadas."}
                 </p>
                 {isTurnoUnlocked && currentPhase === "turno" && viewMode === "stepped" && (
-                  <div className="mt-2 text-[10px] font-black text-amber-800 uppercase tracking-wider flex items-center space-x-1">
+                  <div className="mt-2 text-[11px] font-black text-amber-800 uppercase tracking-wider flex items-center space-x-1">
                     <span>● Editando esta sección</span>
                   </div>
                 )}
@@ -1199,17 +1199,17 @@ export default function OperationalChecklist({
                     <span className="text-xs font-black uppercase text-slate-800">3. Cierre del Turno</span>
                   </div>
                   {!isCierreUnlocked ? (
-                    <span className="inline-flex items-center space-x-1 text-[10px] font-bold bg-slate-200 text-slate-600 px-2 py-0.5 rounded-md">
+                    <span className="inline-flex items-center space-x-1 text-[11px] font-bold bg-slate-200 text-slate-600 px-2 py-0.5 rounded-md">
                       <Lock className="w-2.5 h-2.5" />
                       <span>Bloqueado</span>
                     </span>
                   ) : isCierreComplete ? (
-                    <span className="inline-flex items-center space-x-1 text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-300">
+                    <span className="inline-flex items-center space-x-1 text-[11px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-300">
                       <Check className="w-3 h-3" />
                       <span>Listo ({cierreEvaluadas}/{cierreTasks.length})</span>
                     </span>
                   ) : (
-                    <span className="text-[10px] font-bold bg-indigo-100 text-indigo-900 px-2 py-0.5 rounded-md border border-indigo-200">
+                    <span className="text-[11px] font-bold bg-indigo-100 text-indigo-900 px-2 py-0.5 rounded-md border border-indigo-200">
                       {cierreEvaluadas}/{cierreTasks.length} Evaluadas
                     </span>
                   )}
@@ -1222,7 +1222,7 @@ export default function OperationalChecklist({
                     : "Cierre de apps, cafetera, inventario final, caja y desinfección."}
                 </p>
                 {isCierreUnlocked && currentPhase === "cierre" && viewMode === "stepped" && (
-                  <div className="mt-2 text-[10px] font-black text-indigo-800 uppercase tracking-wider flex items-center space-x-1">
+                  <div className="mt-2 text-[11px] font-black text-indigo-800 uppercase tracking-wider flex items-center space-x-1">
                     <span>● Editando esta sección</span>
                   </div>
                 )}
@@ -1312,7 +1312,7 @@ export default function OperationalChecklist({
                         <h3 className="text-sm font-extrabold text-slate-900">
                           {secInfo.name}
                         </h3>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
                           secInfo.isComplete 
                             ? "bg-emerald-100 text-emerald-800 border border-emerald-300" 
                             : secInfo.badgeBg
@@ -1360,7 +1360,7 @@ export default function OperationalChecklist({
                           <h4 className="font-bold text-xs text-slate-900 flex flex-wrap items-center gap-2">
                             <span>{task.titulo}</span>
                             {task.esProgramada && (
-                              <span className="inline-flex items-center space-x-1 bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2 py-0.5 rounded-full border border-emerald-300">
+                              <span className="inline-flex items-center space-x-1 bg-emerald-100 text-emerald-800 text-[11px] font-extrabold px-2 py-0.5 rounded-full border border-emerald-300">
                                 <Sparkles className="w-3 h-3 text-emerald-600" />
                                 <span>Tarea Programada de Hoy</span>
                               </span>
@@ -1665,7 +1665,7 @@ export default function OperationalChecklist({
                                     <div className="flex items-center space-x-1.5 flex-wrap">
                                       <span className="font-bold text-slate-800 block">{task.titulo}</span>
                                       {task.esProgramada && (
-                                        <span className="text-[9px] font-extrabold px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded border border-emerald-300">
+                                        <span className="text-[11px] font-extrabold px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded border border-emerald-300">
                                           Programada
                                         </span>
                                       )}
@@ -1676,7 +1676,7 @@ export default function OperationalChecklist({
                                       </span>
                                     )}
                                   </div>
-                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border shrink-0 ${
+                                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border shrink-0 ${
                                     task.estado === "cumplido" 
                                       ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                                       : task.estado === "pendiente"

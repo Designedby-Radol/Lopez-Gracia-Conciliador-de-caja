@@ -31,8 +31,8 @@ import {
   Info
 } from "lucide-react";
 import { CierreCaja } from "../types";
-import { jsPDF } from "jspdf";
 import { todayBogota } from "../lib/dates";
+import { loadJsPDF } from "../lib/lazyLibs";
 
 interface IndicadoresDashboardProps {
   cierres: CierreCaja[];
@@ -293,8 +293,8 @@ export default function IndicadoresDashboard({
   }, [attendanceData, teamMembers]);
 
   // Exportar Resumen PDF de Indicadores
-  const exportIndicadoresPDF = () => {
-    const doc = new jsPDF();
+  const exportIndicadoresPDF = async () => {
+    const doc = new (await loadJsPDF())();
     const pageWidth = doc.internal.pageSize.width;
 
     // Header
@@ -460,7 +460,7 @@ export default function IndicadoresDashboard({
             <div className={`p-2 rounded-lg ${selectedSubTab === "inventario" ? "bg-white/10" : "bg-emerald-50 text-emerald-800"}`}>
               <Package className="w-5 h-5" />
             </div>
-            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+            <span className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${
               selectedSubTab === "inventario" ? "bg-white/20 text-white" : "bg-zinc-100 text-zinc-700"
             }`}>
               {inventarioMetrics.coberturaConteo}% Cobertura
@@ -487,7 +487,7 @@ export default function IndicadoresDashboard({
             <div className={`p-2 rounded-lg ${selectedSubTab === "ventas" ? "bg-white/10" : "bg-amber-50 text-amber-800"}`}>
               <DollarSign className="w-5 h-5" />
             </div>
-            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+            <span className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${
               selectedSubTab === "ventas" ? "bg-white/20 text-white" : "bg-amber-100 text-amber-900"
             }`}>
               {ventasMetrics.porcentajeMeta}% Meta
@@ -514,7 +514,7 @@ export default function IndicadoresDashboard({
             <div className={`p-2 rounded-lg ${selectedSubTab === "servicio" ? "bg-white/10" : "bg-purple-50 text-purple-800"}`}>
               <Award className="w-5 h-5" />
             </div>
-            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+            <span className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${
               selectedSubTab === "servicio" ? "bg-white/20 text-white" : "bg-purple-100 text-purple-900"
             }`}>
               {servicioMetrics.promedioCumplimiento}% Estándar
@@ -541,7 +541,7 @@ export default function IndicadoresDashboard({
             <div className={`p-2 rounded-lg ${selectedSubTab === "llegadas" ? "bg-white/10" : "bg-red-50 text-red-800"}`}>
               <Clock className="w-5 h-5" />
             </div>
-            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+            <span className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${
               selectedSubTab === "llegadas" ? "bg-white/20 text-white" : "bg-red-100 text-red-900"
             }`}>
               {llegadasMetrics.tasaPuntualidad}% Puntual
@@ -566,53 +566,53 @@ export default function IndicadoresDashboard({
           {/* Tarjetas Superiores de Inventario */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Cobertura Conteo
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-brand-ink">{inventarioMetrics.coberturaConteo}%</span>
                 <span className="text-xs font-bold text-emerald-700">10 / 10 Ítems</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Última auditoría: {inventarioMetrics.ultimoRegistroFecha}
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Alertas de Stock
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-amber-700">2</span>
                 <span className="text-xs font-bold text-amber-700">Atención preventiva</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Crema de Leche y Mantequilla
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Cierres Registrados
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-brand-ink">{inventarioMetrics.totalRegistros}</span>
                 <span className="text-xs font-bold text-brand-ink/70">Históricos</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Responsable: {inventarioMetrics.ultimoAuditor}
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Eficiencia de Control
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-emerald-700">{inventarioMetrics.eficienciaControl}%</span>
                 <span className="text-xs font-bold text-emerald-700">días con conteo</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Días con cierre que también tienen inventario ({localName})
               </span>
             </div>
@@ -625,14 +625,14 @@ export default function IndicadoresDashboard({
                 <Package className="w-4 h-4 text-[#1E3E30]" />
                 <span>Monitoreo de Insumos Principales & Stock de Seguridad</span>
               </h3>
-              <span className="text-[10px] font-bold bg-white px-2 py-0.5 border border-brand-ink/30 rounded">
+              <span className="text-[11px] font-bold bg-white px-2 py-0.5 border border-brand-ink/30 rounded">
                 Catálogo Base López & Gracia
               </span>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-zinc-100/70 border-b border-brand-ink/20 text-brand-ink font-black uppercase text-[10px]">
+                <thead className="bg-zinc-100/70 border-b border-brand-ink/20 text-brand-ink font-black uppercase text-[11px]">
                   <tr>
                     <th className="py-2.5 px-4">Insumo</th>
                     <th className="py-2.5 px-4">Categoría</th>
@@ -648,7 +648,7 @@ export default function IndicadoresDashboard({
                       <td className="py-3 px-4 text-zinc-600">{item.categoria}</td>
                       <td className="py-3 px-4 font-mono font-bold">{item.nivel}</td>
                       <td className="py-3 px-4 text-center">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase ${
                           item.urgencia === "alta"
                             ? "bg-red-100 text-red-900 border border-red-300"
                             : item.urgencia === "media"
@@ -678,7 +678,7 @@ export default function IndicadoresDashboard({
           {/* Tarjetas Principales de Ventas */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Ventas Totales
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
@@ -692,13 +692,13 @@ export default function IndicadoresDashboard({
                   style={{ width: `${ventasMetrics.porcentajeMeta}%` }}
                 />
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 {ventasMetrics.porcentajeMeta}% de la meta ({formatCOP(metaVentas)})
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Venta Promedio por Día
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
@@ -706,13 +706,13 @@ export default function IndicadoresDashboard({
                   {formatCOP(ventasMetrics.ticketPromedioEstimado)}
                 </span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-2">
+              <span className="text-[11px] text-zinc-500 block mt-2">
                 Total de ventas ÷ días con cierre
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Propinas Recaudadas
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
@@ -720,13 +720,13 @@ export default function IndicadoresDashboard({
                   {formatCOP(ventasMetrics.totalPropinas)}
                 </span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-2">
+              <span className="text-[11px] text-zinc-500 block mt-2">
                 Para distribución por puntos
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Eficiencia de Cuadre
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
@@ -737,7 +737,7 @@ export default function IndicadoresDashboard({
                   {ventasMetrics.cierresCuadrados}/{ventasMetrics.totalCierres} Cierres
                 </span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-2">
+              <span className="text-[11px] text-zinc-500 block mt-2">
                 Cierres cuadrados sin faltantes
               </span>
             </div>
@@ -760,7 +760,7 @@ export default function IndicadoresDashboard({
                 <span className="text-base font-black font-mono block text-brand-ink">
                   {formatCOP(ventasMetrics.totalDatafono)}
                 </span>
-                <span className="text-[10px] text-zinc-500">
+                <span className="text-[11px] text-zinc-500">
                   {ventasMetrics.totalVentas > 0 ? Math.round((ventasMetrics.totalDatafono / ventasMetrics.totalVentas) * 100) : 0}% del total
                 </span>
               </div>
@@ -774,7 +774,7 @@ export default function IndicadoresDashboard({
                 <span className="text-base font-black font-mono block text-brand-ink">
                   {formatCOP(ventasMetrics.totalEfectivo)}
                 </span>
-                <span className="text-[10px] text-zinc-500">
+                <span className="text-[11px] text-zinc-500">
                   {ventasMetrics.totalVentas > 0 ? Math.round((ventasMetrics.totalEfectivo / ventasMetrics.totalVentas) * 100) : 0}% del total
                 </span>
               </div>
@@ -788,7 +788,7 @@ export default function IndicadoresDashboard({
                 <span className="text-base font-black font-mono block text-brand-ink">
                   {formatCOP(ventasMetrics.totalRappi)}
                 </span>
-                <span className="text-[10px] text-zinc-500">
+                <span className="text-[11px] text-zinc-500">
                   {ventasMetrics.totalVentas > 0 ? Math.round((ventasMetrics.totalRappi / ventasMetrics.totalVentas) * 100) : 0}% del total
                 </span>
               </div>
@@ -802,7 +802,7 @@ export default function IndicadoresDashboard({
                 <span className="text-base font-black font-mono block text-brand-ink">
                   {formatCOP(ventasMetrics.totalJusto)}
                 </span>
-                <span className="text-[10px] text-zinc-500">
+                <span className="text-[11px] text-zinc-500">
                   {ventasMetrics.totalVentas > 0 ? Math.round((ventasMetrics.totalJusto / ventasMetrics.totalVentas) * 100) : 0}% del total
                 </span>
               </div>
@@ -816,7 +816,7 @@ export default function IndicadoresDashboard({
                 <span className="text-base font-black font-mono block text-brand-ink">
                   {formatCOP(ventasMetrics.totalTransferencias)}
                 </span>
-                <span className="text-[10px] text-zinc-500">
+                <span className="text-[11px] text-zinc-500">
                   {ventasMetrics.totalVentas > 0 ? Math.round((ventasMetrics.totalTransferencias / ventasMetrics.totalVentas) * 100) : 0}% del total
                 </span>
               </div>
@@ -833,33 +833,33 @@ export default function IndicadoresDashboard({
           {/* Tarjetas Principales de Servicio */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Cumplimiento Checklist
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-brand-ink">{servicioMetrics.promedioCumplimiento}%</span>
                 <span className="text-xs font-bold text-emerald-700">Apertura & Cierre</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 {servicioMetrics.totalChecklists} inspecciones evaluadas
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Índice NPS Operativo
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-purple-800">{servicioMetrics.npsEstimado ?? "N/D"}</span>
                 <span className="text-xs font-bold text-purple-800">Sin encuestas registradas</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Satisfacción en mesa y mostrador
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Propinas / Cierre
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
@@ -867,20 +867,20 @@ export default function IndicadoresDashboard({
                   {formatCOP(servicioMetrics.propinasPorCierrePromedio)}
                 </span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Reflejo de buena atención
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Bioseguridad & Limpieza
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-emerald-700">98%</span>
                 <span className="text-xs font-bold text-emerald-700">Estándar BPM</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Manipulación higiénica de alimentos
               </span>
             </div>
@@ -936,20 +936,20 @@ export default function IndicadoresDashboard({
           {/* Tarjetas Principales de Llegadas Tarde */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Tasa de Puntualidad
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-brand-ink">{llegadasMetrics.tasaPuntualidad}%</span>
                 <span className="text-xs font-bold text-emerald-700">A tiempo</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Basado en {llegadasMetrics.totalMarcaciones} turnos evaluados
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Llegadas Tarde Registradas
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
@@ -958,13 +958,13 @@ export default function IndicadoresDashboard({
                 </span>
                 <span className="text-xs font-bold text-red-600">Eventos</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Conteo desde el minuto 1
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Minutos Acumulados
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
@@ -972,19 +972,19 @@ export default function IndicadoresDashboard({
                   {llegadasMetrics.totalMinutosTardanza} min
                 </span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Tiempo faltante acumulado
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Estado Disciplinario
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-emerald-700">Controlado</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Sede {localName}
               </span>
             </div>
@@ -997,14 +997,14 @@ export default function IndicadoresDashboard({
                 <Clock className="w-4 h-4 text-[#1E3E30]" />
                 <span>Consolidado de Puntualidad y Llegadas Tarde por Colaborador</span>
               </h3>
-              <span className="text-[10px] font-bold bg-white px-2 py-0.5 border border-brand-ink/30 rounded">
+              <span className="text-[11px] font-bold bg-white px-2 py-0.5 border border-brand-ink/30 rounded">
                 Reportes POS & Nómina
               </span>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-zinc-100/70 border-b border-brand-ink/20 text-brand-ink font-black uppercase text-[10px]">
+                <thead className="bg-zinc-100/70 border-b border-brand-ink/20 text-brand-ink font-black uppercase text-[11px]">
                   <tr>
                     <th className="py-2.5 px-4">Colaborador</th>
                     <th className="py-2.5 px-4">Cargo</th>
@@ -1036,7 +1036,7 @@ export default function IndicadoresDashboard({
                           {colab.minutos > 0 ? `${colab.minutos} min` : "0 min"}
                         </td>
                         <td className="py-3 px-4 text-right">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold font-mono ${
                             colabPuntualidad >= 95
                               ? "bg-emerald-100 text-emerald-900 border border-emerald-300"
                               : colabPuntualidad >= 80

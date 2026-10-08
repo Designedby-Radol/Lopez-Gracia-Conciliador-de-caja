@@ -1,6 +1,6 @@
-import * as XLSX from "xlsx";
 import { getColombianHolidays } from "./colombiaHolidays";
 import { minutosNocturnos, duracionTurnoMin } from "../lib/payroll";
+import { loadXLSX } from "../lib/lazyLibs";
 // Utilitarios y Lógica de Nómina Colombiana con Reglas POS, Festivos y Recargos 2026
 
 // Calendario de Días Festivos Oficiales Colombia 2026 (Ley Emiliani)
@@ -752,7 +752,11 @@ export const parseExcelDateTimeStr = (valStr: string): { dateIso: string; timeSt
 
   let dateIso = "";
   if (datePart) {
-    dateIso = parsePosDateToIsoWithFormat(datePart, "DD/MM/YYYY");
+    // Celdas con fecha real de Excel llegan como ISO (YYYY-MM-DD) por el dateNF de XLSX.read
+    const iso = datePart.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    dateIso = iso
+      ? `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`
+      : parsePosDateToIsoWithFormat(datePart, "DD/MM/YYYY");
   }
 
   let timeStr = "";
@@ -826,10 +830,11 @@ export const matchMemberFromExcel = (
  * - Ignora las filas donde la hora de inicio (Columna N / índice 13) esté vacía.
  * - Mapa de columnas: Col A = Cédula, Col D = Nombres, Col H = Apellidos, Col N = Entrada, Col O = Salida.
  */
-export const parsePosExcelFile = (
+export const parsePosExcelFile = async (
   arrayBuffer: ArrayBuffer,
   teamMembers: any[]
-): Record<string, Record<string, PosTimestampLog>> => {
+): Promise<Record<string, Record<string, PosTimestampLog>>> => {
+  const XLSX = await loadXLSX();
   const result: Record<string, Record<string, PosTimestampLog>> = {};
   if (!arrayBuffer || !teamMembers) return result;
 

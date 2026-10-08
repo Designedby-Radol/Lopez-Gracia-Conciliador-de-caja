@@ -517,7 +517,7 @@ export default function InventoryClosure({
                               {item.nombre}
                             </span>
                             <div className="flex items-center space-x-2 mt-0.5">
-                              <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md">
+                              <span className="text-[11px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md">
                                 {masterInfo?.categoria || "General"}
                               </span>
                               <span className="text-xs text-slate-400 font-numeric font-medium">
@@ -558,7 +558,7 @@ export default function InventoryClosure({
 
                             {/* Total Display */}
                             <div className="bg-slate-900 text-white px-3.5 py-2 rounded-xl text-right shrink-0 min-w-[120px]">
-                              <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase block">
+                              <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase block">
                                 Total Calculado
                               </span>
                               <span className="text-sm font-extrabold font-numeric">

@@ -106,7 +106,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
             <h2 className="text-xs font-black uppercase tracking-widest text-[#1C2E24]">
               Acceso al Sistema Operativo
             </h2>
-            <p className="text-[10px] text-zinc-500 font-semibold mt-0.5">
+            <p className="text-[11px] text-zinc-500 font-semibold mt-0.5">
               Autenticación segura multi-local
             </p>
           </div>
@@ -195,7 +195,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
             </form>
 
             <div className="pt-2">
-              <div className="bg-amber-50 border border-amber-200/70 rounded-xl p-2.5 flex items-start gap-2 text-[10px] text-amber-800">
+              <div className="bg-amber-50 border border-amber-200/70 rounded-xl p-2.5 flex items-start gap-2 text-[11px] text-amber-800">
                 <Info className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
                 <span>
                   El alta de nuevos colaboradores se administra exclusivamente por Gerencia en la pestaña de Equipo del Dashboard.
@@ -288,7 +288,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                 </p>
 
                 <div>
-                  <label className="block text-[10px] font-black text-[#1C2E24]/60 uppercase tracking-widest mb-1.5">
+                  <label className="block text-[11px] font-black text-[#1C2E24]/60 uppercase tracking-widest mb-1.5">
                     Correo o Cédula del Colaborador
                   </label>
                   <input

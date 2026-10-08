@@ -29,9 +29,6 @@ import {
   ClipboardCheck,
   Pencil
 } from "lucide-react";
-import * as pdfjsLib from "pdfjs-dist";
-// @ts-ignore
-import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { dbAdapter } from "../db/dbAdapter";
 import { api } from "../lib/api";
 import { CierreCaja } from "../types";
@@ -41,7 +38,6 @@ import OperationalChecklist from "./OperationalChecklist";
 import { todayBogota } from "../lib/dates";
 
 // Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 interface CollaboratorInflowProps {
   onLogout: () => void;
@@ -618,7 +614,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
               <h1 className="text-sm font-extrabold tracking-tight text-slate-900">
                 López & Gracia
               </h1>
-              <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200/50">
+              <span className="bg-emerald-50 text-emerald-700 text-[11px] font-bold px-2 py-0.5 rounded-full border border-emerald-200/50">
                 Punto {local}
               </span>
             </div>
@@ -995,7 +991,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                               </button>
                             ) : (
                               <span
-                                className="px-2.5 py-1 bg-slate-100 text-slate-500 font-semibold text-[10px] rounded-lg border border-slate-200 flex items-center space-x-1 cursor-not-allowed opacity-80"
+                                className="px-2.5 py-1 bg-slate-100 text-slate-500 font-semibold text-[11px] rounded-lg border border-slate-200 flex items-center space-x-1 cursor-not-allowed opacity-80"
                                 title="Este cierre ya fue auditado y conciliado ('Cuadrado'), no es editable"
                               >
                                 <Lock className="w-3 h-3 text-slate-400" />
@@ -1006,7 +1002,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
 
                           <div className="flex items-center justify-between w-full sm:w-auto sm:space-x-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
                             <div className="text-right">
-                              <span className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider leading-none mb-1">Total Reportado</span>
+                              <span className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider leading-none mb-1">Total Reportado</span>
                               <span className="font-extrabold text-sm text-slate-900 leading-none font-numeric">{formatCOP(String(totalCierre))}</span>
                             </div>
                             <div className="text-slate-400 p-1 rounded-lg hover:bg-slate-100">
@@ -1059,7 +1055,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                                   <h4 className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2 mb-3 flex justify-between items-center">
                                     <span>Auditoría de Ventas</span>
                                     {c.estado === "Cuadrado" && (
-                                      <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded-md">Aprobado</span>
+                                      <span className="text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded-md">Aprobado</span>
                                     )}
                                   </h4>
 
@@ -1070,7 +1066,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                                         <span className="text-slate-500">Efectivo POS / Dif:</span>
                                         <div className="text-right">
                                           <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.efectivoPOS))}</span>
-                                          <span className={`text-[10px] font-bold font-numeric ${
+                                          <span className={`text-[11px] font-bold font-numeric ${
                                             (c.difEfectivo || 0) === 0 ? "text-emerald-600" : (c.difEfectivo || 0) < 0 ? "text-rose-600" : "text-blue-600"
                                           }`}>
                                             {(c.difEfectivo || 0) === 0 ? "Sin dif." : `${(c.difEfectivo || 0) > 0 ? "+" : ""}${formatCOP(String(c.difEfectivo))}`}
@@ -1082,7 +1078,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                                         <span className="text-slate-500">Datáfono POS / Dif:</span>
                                         <div className="text-right">
                                           <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.tarjetasPOS))}</span>
-                                          <span className={`text-[10px] font-bold font-numeric ${
+                                          <span className={`text-[11px] font-bold font-numeric ${
                                             (c.difTarjetas || 0) === 0 ? "text-emerald-600" : (c.difTarjetas || 0) < 0 ? "text-rose-600" : "text-blue-600"
                                           }`}>
                                             {(c.difTarjetas || 0) === 0 ? "Sin dif." : `${(c.difTarjetas || 0) > 0 ? "+" : ""}${formatCOP(String(c.difTarjetas))}`}
@@ -1094,7 +1090,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                                         <span className="text-slate-500">Justo POS / Dif:</span>
                                         <div className="text-right">
                                           <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.justoPOS))}</span>
-                                          <span className={`text-[10px] font-bold font-numeric ${
+                                          <span className={`text-[11px] font-bold font-numeric ${
                                             (c.difJusto || 0) === 0 ? "text-emerald-600" : (c.difJusto || 0) < 0 ? "text-rose-600" : "text-blue-600"
                                           }`}>
                                             {(c.difJusto || 0) === 0 ? "Sin dif." : `${(c.difJusto || 0) > 0 ? "+" : ""}${formatCOP(String(c.difJusto))}`}
@@ -1106,7 +1102,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                                         <span className="text-slate-500">Rappi POS / Dif:</span>
                                         <div className="text-right">
                                           <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.rappiPOS))}</span>
-                                          <span className={`text-[10px] font-bold font-numeric ${
+                                          <span className={`text-[11px] font-bold font-numeric ${
                                             (c.difRappi || 0) === 0 ? "text-emerald-600" : (c.difRappi || 0) < 0 ? "text-rose-600" : "text-blue-600"
                                           }`}>
                                             {(c.difRappi || 0) === 0 ? "Sin dif." : `${(c.difRappi || 0) > 0 ? "+" : ""}${formatCOP(String(c.difRappi))}`}
@@ -1118,7 +1114,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                                         <span className="text-slate-500">Transf. POS / Dif:</span>
                                         <div className="text-right">
                                           <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.transferenciasPOS))}</span>
-                                          <span className={`text-[10px] font-bold font-numeric ${
+                                          <span className={`text-[11px] font-bold font-numeric ${
                                             (c.difTransferencias || 0) === 0 ? "text-emerald-600" : (c.difTransferencias || 0) < 0 ? "text-rose-600" : "text-blue-600"
                                           }`}>
                                             {(c.difTransferencias || 0) === 0 ? "Sin dif." : `${(c.difTransferencias || 0) > 0 ? "+" : ""}${formatCOP(String(c.difTransferencias))}`}
@@ -1402,7 +1398,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                 <div className="col-span-1">
                   <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
                     <span>Responsable del Cierre</span>
-                    <span className="text-[10px] text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-full">Obligatorio</span>
+                    <span className="text-[11px] text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-full">Obligatorio</span>
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 pointer-events-none">
@@ -1436,7 +1432,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
                         <span>Líder de Punto a Cargo</span>
-                        <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full">Obligatorio</span>
+                        <span className="text-[11px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full">Obligatorio</span>
                       </label>
                       <div className="relative">
                         <select
@@ -1558,7 +1554,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
                       <span>Cierre Justo App</span>
-                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
+                      <span className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
                     </label>
                     <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg font-numeric">{formatCOP(justo)}</span>
                   </div>
@@ -1584,7 +1580,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
                       <span>Cierre Rappi App</span>
-                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
+                      <span className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
                     </label>
                     <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg font-numeric">{formatCOP(rappi)}</span>
                   </div>
@@ -1610,7 +1606,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
                       <span>Transferencias (POS)</span>
-                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
+                      <span className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
                     </label>
                     <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg font-numeric">{formatCOP(transferencias)}</span>
                   </div>
