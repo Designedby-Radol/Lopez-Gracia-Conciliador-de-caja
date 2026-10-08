@@ -33,7 +33,7 @@ import * as pdfjsLib from "pdfjs-dist";
 // @ts-ignore
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { dbAdapter } from "../db/dbAdapter";
-import { supabase } from "../db/supabaseConfig";
+import { api } from "../lib/api";
 import { CierreCaja } from "../types";
 import Logo from "./Logo";
 import InventoryClosure from "./InventoryClosure";
@@ -428,8 +428,8 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
       return;
     }
 
-    if (newPassword.length < 3) {
-      setPasswordError("La nueva contraseña debe tener al menos 3 caracteres.");
+    if (newPassword.length < 6) {
+      setPasswordError("La nueva contraseña debe tener al menos 6 caracteres.");
       return;
     }
 
@@ -441,15 +441,14 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
     setIsUpdatingPassword(true);
 
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) {
-        setPasswordError("Error al actualizar la contraseña: " + error.message);
-      } else {
-        setPasswordSuccess("¡Contraseña actualizada con éxito en Supabase Auth! Utiliza tu nueva contraseña en tu próximo inicio de sesión.");
-        setCurrentPassword("");
-        setNewPassword("");
-        setConfirmPassword("");
-      }
+      await api("/api/auth/change-password", {
+        method: "POST",
+        json: { currentPassword, newPassword },
+      });
+      setPasswordSuccess("¡Contraseña actualizada! Utiliza tu nueva contraseña en tu próximo inicio de sesión.");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
     } catch (err: any) {
       setPasswordError(err?.message || "Error al actualizar contraseña");
     } finally {

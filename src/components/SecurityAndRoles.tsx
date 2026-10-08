@@ -37,6 +37,7 @@ import {
   SYSTEM_ROLE_PERMISSIONS, 
   RolePermissionsConfig, 
   SecurityAuditEntry,
+  CredentialStatus,
   normalizeSystemRole,
   CanonicalSystemRole
 } from "../utils/securityStore";
@@ -50,10 +51,9 @@ interface SecurityAndRolesProps {
   onAddMember: (memberData: {
     nombre: string;
     cedula: string;
-    password: string;
     role: UserRole;
     activo: boolean;
-  }) => Promise<void>;
+  }) => Promise<{ id: string } | undefined>;
   onReload: () => Promise<void>;
 }
 
@@ -74,8 +74,8 @@ export default function SecurityAndRoles({
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
 
-  // Passwords visibility toggle per user ID
-  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
+  // Estado de credenciales por usuario (sin contraseñas: solo si es temporal y si está activa)
+  const [credentials, setCredentials] = useState<Record<string, CredentialStatus>>({});
 
   // Password edit modal
   const [selectedUserForPassword, setSelectedUserForPassword] = useState<{ id: string; nombre: string; cedula: string } | null>(null);
@@ -87,7 +87,7 @@ export default function SecurityAndRoles({
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [newUserName, setNewUserName] = useState("");
   const [newUserCedula, setNewUserCedula] = useState("");
-  const [newUserPassword, setNewUserPassword] = useState("tienda");
+  const [newUserPassword, setNewUserPassword] = useState(() => securityStore.generateTemporaryPassword());
   const [newUserRole, setNewUserRole] = useState<UserRole>("Asistente de Servicio");
   const [isSubmittingNewUser, setIsSubmittingNewUser] = useState(false);
 
@@ -102,27 +102,25 @@ export default function SecurityAndRoles({
   const [supabaseConnected, setSupabaseConnected] = useState(true);
 
   // Audit logs state
-  const [auditLogs, setAuditLogs] = useState<SecurityAuditEntry[]>(() => securityStore.getAuditLogs());
+  const [auditLogs, setAuditLogs] = useState<SecurityAuditEntry[]>([]);
   const [auditFilterAction, setAuditFilterAction] = useState<string>("all");
   const [auditSearchQuery, setAuditSearchQuery] = useState<string>("");
 
-  // Helper to determine if a member is suspended in Supabase
   const isMemberSuspended = (member: any) => {
-    const status = securityStore.getUserStatus(member.cedula || member.nombre);
-    return status === "suspended" || member.activo === false;
+    const cred = credentials[member.id];
+    return cred ? !cred.activo : member.activo === false;
   };
 
-  // Sincronización en tiempo real con Supabase Cloud
   const syncWithSupabase = async () => {
     setIsSyncing(true);
     try {
-      await securityStore.fetchSecurityConfigFromSupabase();
-      const liveLogs = await securityStore.fetchAuditLogsFromSupabase();
-      setAuditLogs(liveLogs);
+      const [creds, logs] = await Promise.all([securityStore.fetchCredentials(), securityStore.fetchAuditLogs()]);
+      setCredentials(creds);
+      setAuditLogs(logs);
       setLastSyncTime(new Date());
       setSupabaseConnected(true);
     } catch (err) {
-      console.error("Error al sincronizar seguridad con Supabase:", err);
+      console.error("Error al sincronizar seguridad:", err);
       setSupabaseConnected(false);
     } finally {
       setIsSyncing(false);
@@ -181,62 +179,45 @@ export default function SecurityAndRoles({
     URL.revokeObjectURL(url);
   };
 
-  const togglePasswordVisibility = (identifier: string) => {
-    setVisiblePasswords((prev) => ({
-      ...prev,
-      [identifier]: !prev[identifier]
-    }));
-  };
-
   const handleOpenPasswordModal = (member: any) => {
-    const currentPass = securityStore.getPasswordForUser(member.cedula || member.nombre);
     setSelectedUserForPassword({ id: member.id, nombre: member.nombre, cedula: member.cedula || "" });
-    setNewPasswordInput(currentPass);
+    setNewPasswordInput(securityStore.generateTemporaryPassword());
     setPasswordChangeSuccess(false);
   };
 
   const handleSaveNewPassword = async () => {
     if (!selectedUserForPassword) return;
     const cleanPass = newPasswordInput.trim();
-    if (!cleanPass) {
-      alert("Por favor ingresa una contraseña o PIN válido.");
+    if (cleanPass.length < 6) {
+      alert("La clave temporal debe tener al menos 6 caracteres.");
       return;
     }
 
     setIsProcessing(true);
     try {
-      const identifier = selectedUserForPassword.cedula || selectedUserForPassword.nombre;
-      await securityStore.setPasswordForUser(identifier, cleanPass, currentUsername);
+      await securityStore.setTemporaryPassword(selectedUserForPassword.id, cleanPass);
       await syncWithSupabase();
+      // La clave se muestra una sola vez para que Gerencia la entregue al colaborador.
       setPasswordChangeSuccess(true);
-      setTimeout(() => {
-        setSelectedUserForPassword(null);
-        setPasswordChangeSuccess(false);
-      }, 1200);
     } catch (err: any) {
-      alert("Error al actualizar la contraseña en Supabase: " + err.message);
+      alert("Error al asignar la contraseña: " + err.message);
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleGenerateRandomPin = () => {
-    const randomPin = Math.floor(100000 + Math.random() * 900000).toString();
-    setNewPasswordInput(randomPin);
+    setNewPasswordInput(securityStore.generateTemporaryPassword());
   };
 
   const handleToggleUserStatus = async (member: any) => {
-    const currentlySuspended = isMemberSuspended(member);
-    const newStatusStr = currentlySuspended ? "active" : "suspended";
     setIsProcessing(true);
     try {
-      const identifier = member.cedula || member.nombre;
-      await securityStore.setUserStatus(identifier, newStatusStr, currentUsername, member.nombre);
-      await onUpdateMember(member.id, { activo: newStatusStr === "active" });
+      await securityStore.setUserActive(member.id, isMemberSuspended(member));
       await syncWithSupabase();
       await onReload();
     } catch (err: any) {
-      alert("Error al cambiar estado del usuario en Supabase: " + err.message);
+      alert("Error al cambiar el estado de la cuenta: " + err.message);
     } finally {
       setIsProcessing(false);
     }
@@ -245,12 +226,12 @@ export default function SecurityAndRoles({
   const handleChangeUserRole = async (member: any, newRole: string) => {
     setIsProcessing(true);
     try {
-      await securityStore.updateUserRole(member.id, newRole, newRole, currentUsername, member.nombre);
+      // saveTeamMember traduce el rol visible al cargo/rol de la base de datos y el servidor lo audita.
       await onUpdateMember(member.id, { role: newRole, cargo: newRole });
       await syncWithSupabase();
       await onReload();
     } catch (err: any) {
-      alert("Error al cambiar rol del usuario en Supabase: " + err.message);
+      alert("Error al cambiar el rol: " + err.message);
     } finally {
       setIsProcessing(false);
     }
@@ -266,12 +247,6 @@ export default function SecurityAndRoles({
     setIsDeleting(true);
     try {
       await onDeleteMember(userToDelete.nombre);
-      await securityStore.addAuditLog({
-        action: "USER_STATUS_CHANGED",
-        targetUser: userToDelete.nombre,
-        executedBy: currentUsername,
-        description: `Cuenta eliminada de la base de datos de Supabase Cloud.`
-      });
       await syncWithSupabase();
       setUserToDelete(null);
       await onReload();
@@ -303,30 +278,27 @@ export default function SecurityAndRoles({
 
     setIsSubmittingNewUser(true);
     try {
-      await onAddMember({
+      if (newUserPassword.trim().length < 6) {
+        alert("La clave temporal debe tener al menos 6 caracteres.");
+        return;
+      }
+      const saved = await onAddMember({
         nombre: cleanName,
         cedula: cleanCedula,
-        password: newUserPassword.trim() || "tienda",
         role: newUserRole,
         activo: true
       });
+      if (!saved?.id) throw new Error("No se recibió el ID del usuario creado.");
 
-      // Guardar clave y estado en Supabase Cloud
-      await securityStore.setPasswordForUser(cleanCedula, newUserPassword.trim() || "tienda", currentUsername);
-      await securityStore.setUserStatus(cleanCedula, "active", currentUsername, cleanName);
-      await securityStore.addAuditLog({
-        action: "USER_CREATED",
-        targetUser: cleanName,
-        executedBy: currentUsername,
-        description: `Nueva cuenta creada con rol "${newUserRole}" y persistida en Supabase Cloud.`
-      });
-
+      // Clave temporal: el colaborador la cambiará en su primer ingreso.
+      await securityStore.setTemporaryPassword(saved.id, newUserPassword.trim());
+      alert(`Cuenta creada. Entrega esta clave temporal a ${cleanName}: ${newUserPassword.trim()}\n(Deberá cambiarla al ingresar.)`);
       await syncWithSupabase();
 
       // Resetear y cerrar
       setNewUserName("");
       setNewUserCedula("");
-      setNewUserPassword("tienda");
+      setNewUserPassword(securityStore.generateTemporaryPassword());
       setNewUserRole("Asistente de Servicio");
       setIsAddUserModalOpen(false);
       await onReload();
@@ -545,8 +517,7 @@ export default function SecurityAndRoles({
                     filteredMembers.map((member) => {
                       const userRole = normalizeSystemRole(member.cargo || member.role);
                       const roleConfig = SYSTEM_ROLE_PERMISSIONS[userRole] || SYSTEM_ROLE_PERMISSIONS["Asistente de Servicio"];
-                      const userPass = securityStore.getPasswordForUser(member.cedula || member.nombre);
-                      const isPassVisible = !!visiblePasswords[member.id];
+                      const cred = credentials[member.id];
                       const isSuspended = isMemberSuspended(member);
 
                       return (
@@ -604,18 +575,15 @@ export default function SecurityAndRoles({
 
                           {/* Contraseña / Credencial */}
                           <td className="py-3 px-3">
-                            <div className="flex items-center space-x-2">
-                              <div className="bg-zinc-50 border border-brand-ink/20 px-2.5 py-1 rounded font-mono font-bold text-xs tracking-wider text-brand-ink flex items-center space-x-1.5 min-w-[90px]">
-                                <Lock className="w-3 h-3 text-zinc-400" />
-                                <span>{isPassVisible ? userPass : "••••••••"}</span>
-                              </div>
-                              <button
-                                onClick={() => togglePasswordVisibility(member.id)}
-                                className="p-1 text-zinc-400 hover:text-brand-ink transition-colors cursor-pointer"
-                                title={isPassVisible ? "Ocultar" : "Mostrar"}
-                              >
-                                {isPassVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                              </button>
+                            <div className="flex items-center space-x-1.5 text-xs font-bold">
+                              <Lock className="w-3 h-3 text-zinc-500" aria-hidden="true" />
+                              {!cred?.updated_at ? (
+                                <span className="text-zinc-500">Sin clave propia</span>
+                              ) : cred.debe_cambiar ? (
+                                <span className="text-amber-700">Clave temporal</span>
+                              ) : (
+                                <span className="text-emerald-700">Clave propia</span>
+                              )}
                             </div>
                           </td>
 
@@ -1022,7 +990,7 @@ export default function SecurityAndRoles({
 
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink block">
-                Nueva Contraseña / PIN de Inicio de Sesión:
+                Clave temporal (el colaborador deberá cambiarla al ingresar):
               </label>
               <div className="relative">
                 <input
@@ -1030,7 +998,7 @@ export default function SecurityAndRoles({
                   value={newPasswordInput}
                   onChange={(e) => setNewPasswordInput(e.target.value)}
                   className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-sm font-mono font-bold text-brand-ink outline-none pr-10"
-                  placeholder="Ej. tienda o 123456"
+                  placeholder="Mínimo 6 caracteres"
                 />
                 <button
                   type="button"
@@ -1048,16 +1016,16 @@ export default function SecurityAndRoles({
                   className="text-[11px] font-bold text-blue-700 hover:underline flex items-center space-x-1 cursor-pointer"
                 >
                   <Sparkles className="w-3 h-3" />
-                  <span>Generar PIN aleatorio (6 dígitos)</span>
+                  <span>Generar clave aleatoria</span>
                 </button>
-                <span className="text-[10px] font-mono text-zinc-400">Min. 4 caracteres</span>
+                <span className="text-xs font-mono text-zinc-500">Mín. 6 caracteres</span>
               </div>
             </div>
 
             {passwordChangeSuccess && (
               <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold p-3 rounded-lg flex items-center space-x-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>¡Contraseña actualizada con éxito en el sistema!</span>
+                <span>Clave temporal asignada. Entrégala al colaborador: <span className="font-mono">{newPasswordInput}</span></span>
               </div>
             )}
 
@@ -1067,15 +1035,15 @@ export default function SecurityAndRoles({
                 onClick={() => setSelectedUserForPassword(null)}
                 className="px-4 py-2 border-2 border-brand-ink bg-zinc-100 hover:bg-zinc-200 text-brand-ink text-xs font-bold cursor-pointer transition-colors"
               >
-                Cancelar
+                {passwordChangeSuccess ? "Cerrar" : "Cancelar"}
               </button>
               <button
                 type="button"
                 onClick={handleSaveNewPassword}
-                disabled={isProcessing}
-                className="px-5 py-2 bg-[#1E3E30] hover:bg-[#162e24] text-white text-xs font-black uppercase tracking-wider cursor-pointer transition-all shadow-[2px_2px_0px_0px_#1C1917]"
+                disabled={isProcessing || passwordChangeSuccess}
+                className="px-5 py-2 bg-[#1E3E30] hover:bg-[#162e24] text-white text-xs font-black uppercase tracking-wider cursor-pointer transition-all shadow-[2px_2px_0px_0px_#1C1917] disabled:opacity-50"
               >
-                {isProcessing ? "Guardando..." : "Guardar Contraseña"}
+                {isProcessing ? "Guardando..." : "Asignar clave temporal"}
               </button>
             </div>
           </div>

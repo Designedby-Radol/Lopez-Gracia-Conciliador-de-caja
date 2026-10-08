@@ -1,50 +1,19 @@
-import { supabase } from "./supabaseConfig";
+import { api } from "../lib/api";
 import { CierreCaja, Cargo, AccessRole } from "../types";
 
 let cachedLocalMap: Record<string, string> = {};
 
 export async function resolveLocalId(localNameOrId?: string): Promise<string> {
   if (!localNameOrId) localNameOrId = "Chapinero";
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(localNameOrId)) {
-    return localNameOrId;
-  }
-  const clean = localNameOrId.trim();
-  if (cachedLocalMap[clean.toLowerCase()]) {
-    return cachedLocalMap[clean.toLowerCase()];
-  }
+  if (isValidUUID(localNameOrId)) return localNameOrId;
+  const clean = localNameOrId.trim().toLowerCase();
+  if (cachedLocalMap[clean]) return cachedLocalMap[clean];
 
-  try {
-    const { data, error } = await supabase
-      .from("locales")
-      .select("id, nombre")
-      .ilike("nombre", clean)
-      .maybeSingle();
-
-    if (!error && data?.id) {
-      cachedLocalMap[clean.toLowerCase()] = data.id;
-      return data.id;
-    }
-  } catch (e) {
-    console.warn("No fue posible resolver el ID del local desde Supabase directo:", e);
-  }
-
-  // Fallback a API del servidor (ignora RLS con service_role)
-  try {
-    const res = await fetch("/api/db/locales");
-    if (res.ok) {
-      const json = await res.json();
-      const list = json.data || [];
-      const found = list.find((l: any) => l.nombre?.toLowerCase() === clean.toLowerCase()) || list[0];
-      if (found?.id) {
-        cachedLocalMap[clean.toLowerCase()] = found.id;
-        return found.id;
-      }
-    }
-  } catch (e) {
-    console.warn("Fallback /api/db/locales falló:", e);
-  }
-
-  return clean;
+  const { data } = await api<{ data: { id: string; nombre: string }[] }>("/api/db/locales");
+  for (const l of data) cachedLocalMap[l.nombre.trim().toLowerCase()] = l.id;
+  const found = cachedLocalMap[clean];
+  if (!found) throw new Error(`No existe el local "${localNameOrId}".`);
+  return found;
 }
 
 export function isValidUUID(val?: string | null): boolean {
@@ -54,17 +23,15 @@ export function isValidUUID(val?: string | null): boolean {
 
 export function getFriendlyName(emailOrName?: string | null): string {
   if (!emailOrName) return "";
-  const lower = emailOrName.toLowerCase();
-  if (lower.includes("raulsantiago")) return "Raúl Santiago Ramírez";
-  if (lower.includes("floralba")) return "Flor Alba Puyo";
-  if (lower.includes("sofiaramirez") || lower.includes("sofia")) return "Sofía Ramírez";
-  if (lower.includes("1020730746")) return "Colaborador (1020730746)";
-  if (emailOrName.includes("@")) {
-    return emailOrName.split("@")[0];
-  }
+  if (emailOrName.includes("@")) return emailOrName.split("@")[0];
   return emailOrName;
 }
 
+function normalizeName(s: string): string {
+  return s.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ");
+}
+
+/** Resuelve un nombre/cédula a UUID con coincidencia EXACTA (nunca aproximada: atribuir un cierre a otra persona es grave). */
 async function resolveUserId(nameOrIdentifier?: string | null): Promise<string | null> {
   if (!nameOrIdentifier || typeof nameOrIdentifier !== "string") return null;
   const clean = nameOrIdentifier.trim();
@@ -72,28 +39,13 @@ async function resolveUserId(nameOrIdentifier?: string | null): Promise<string |
 
   try {
     const members = await dbAdapter.getTeamMembers();
-    const cleanLower = clean.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const cleanAlpha = cleanLower.replace(/[^a-z0-9]/g, "");
-
-    const found = members.find(m => {
-      const nom = (m.nombre || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const nomAlpha = nom.replace(/[^a-z0-9]/g, "");
-      const em = (m.email || "").toLowerCase();
-      const ced = String(m.cedula || "").trim();
-
-      if (nom === cleanLower) return true;
-      if (em === cleanLower) return true;
-      if (ced && (clean.includes(ced) || ced === clean)) return true;
-      if (cleanAlpha.length >= 3 && (nomAlpha.includes(cleanAlpha) || cleanAlpha.includes(nomAlpha))) return true;
-      if (cleanLower.includes("raulsantiago") && nom.includes("raulsantiago")) return true;
-      if (cleanLower.includes("floralba") && nom.includes("floralba")) return true;
-      if (cleanLower.includes("sofia") && nom.includes("sofia")) return true;
-      if (cleanLower.includes("1020730746") && nom.includes("1020730746")) return true;
-      return false;
-    });
-    if (found && found.id && isValidUUID(found.id)) {
-      return found.id;
-    }
+    const target = normalizeName(clean);
+    const found = members.filter(m =>
+      normalizeName(m.nombre || "") === target ||
+      (m.email && normalizeName(m.email) === target) ||
+      (m.cedula && String(m.cedula).trim() === clean)
+    );
+    if (found.length === 1 && isValidUUID(found[0].id)) return found[0].id;
   } catch (e) {
     console.warn("No se pudo resolver usuario desde teamMembers:", e);
   }
@@ -204,111 +156,24 @@ export const dbAdapter = {
   // ---- Cierres de caja ----
   async getCierres(localNameOrId: string = "Chapinero"): Promise<CierreCaja[]> {
     const localId = await resolveLocalId(localNameOrId);
-    let rows: any[] = [];
-    try {
-      const { data, error } = await supabase
-        .from("cierres_caja")
-        .select("*, colaborador:usuarios!colaborador_id(nombre), auditor:usuarios!auditado_por(nombre)")
-        .eq("local_id", localId)
-        .neq("estado", "Anulado")
-        .order("fecha", { ascending: false });
-
-      if (!error && data && data.length > 0) {
-        rows = data;
-      }
-    } catch (error) {
-      console.warn("Error al consultar cierres con cliente Supabase directo:", error);
-    }
-
-    // Si RLS devolvió lista vacía o error, consultar a través del servidor Node.js
-    if (rows.length === 0) {
-      try {
-        const res = await fetch(`/api/db/cierres?local_id=${encodeURIComponent(localId)}`);
-        if (res.ok) {
-          const json = await res.json();
-          if (json.data && json.data.length > 0) {
-            rows = json.data;
-          }
-        }
-      } catch (err) {
-        console.warn("Fallback servidor /api/db/cierres falló:", err);
-      }
-    }
-
-    return rows.map(fromDbRow);
+    const { data } = await api<{ data: any[] }>(`/api/db/cierres?local_id=${encodeURIComponent(localId)}`);
+    return data.map(fromDbRow);
   },
 
   async saveCierre(cierre: Omit<CierreCaja, "id" | "createdAt">, localNameOrId: string = "Chapinero"): Promise<CierreCaja> {
     const localId = await resolveLocalId(localNameOrId);
 
-    // Resolver colaborador_id garantizando un UUID válido para que nunca sea null (evita not-null constraint)
-    let resolvedColabId = isValidUUID(cierre.colaboradorId || cierre.colaborador_id)
-      ? (cierre.colaboradorId || cierre.colaborador_id)
-      : null;
-
-    if (!resolvedColabId) {
-      resolvedColabId = await resolveUserId(cierre.colaboradorNombre || (cierre as any).colaborador_nombre || cierre.liderNombre || cierre.colaboradorId);
-    }
-
-    if (!resolvedColabId) {
-      try {
-        const members = await dbAdapter.getTeamMembers(localNameOrId);
-        const validMember = members.find(m => m.id && isValidUUID(m.id));
-        if (validMember?.id) {
-          resolvedColabId = validMember.id;
-        }
-      } catch (e) {
-        console.warn("No se pudo obtener miembros del equipo para asignar colaborador_id:", e);
-      }
-    }
-
+    // El servidor asigna colaborador_id a partir de la sesión; aquí solo se resuelve el líder.
     let resolvedLiderId = isValidUUID(cierre.liderId || cierre.lider_id)
       ? (cierre.liderId || cierre.lider_id)
       : null;
-
     if (!resolvedLiderId && (cierre.liderNombre || cierre.liderId)) {
       resolvedLiderId = await resolveUserId(cierre.liderNombre || cierre.liderId);
     }
 
-    const cierreWithResolvedIds = {
-      ...cierre,
-      colaboradorId: resolvedColabId,
-      colaborador_id: resolvedColabId,
-      liderId: resolvedLiderId,
-      lider_id: resolvedLiderId,
-    };
-
-    const dbPayload = toDbRow(cierreWithResolvedIds, localId);
-
-    try {
-      const { data, error } = await supabase
-        .from("cierres_caja")
-        .insert(dbPayload)
-        .select()
-        .single();
-
-      if (!error && data) {
-        return fromDbRow(data);
-      }
-      if (error) {
-        console.warn("Error Supabase directo insertando cierre:", error.message);
-      }
-    } catch (e) {
-      console.warn("Intento de guardar cierre directo en Supabase falló por RLS, usando API de servidor...", e);
-    }
-
-    // Fallback a API del servidor
-    const res = await fetch("/api/db/cierres", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(dbPayload)
-    });
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error || "Error al guardar cierre en el servidor");
-    }
-    const json = await res.json();
-    return fromDbRow(json.data);
+    const dbPayload = toDbRow({ ...cierre, liderId: resolvedLiderId, lider_id: resolvedLiderId }, localId);
+    const { data } = await api<{ data: any }>("/api/db/cierres", { method: "POST", json: dbPayload });
+    return fromDbRow(data);
   },
 
   async updateCierre(id: string, updates: Partial<CierreCaja>): Promise<void> {
@@ -360,89 +225,34 @@ export const dbAdapter = {
     if (updates.justoPedidosPOS !== undefined) rowUpdates.justo_pedidos_pos = updates.justoPedidosPOS;
     if (updates.justoSobranteEfectivoDespacho !== undefined) rowUpdates.justo_sobrante_efectivo_despacho = updates.justoSobranteEfectivoDespacho;
 
-    try {
-      const { error } = await supabase.from("cierres_caja").update(rowUpdates).eq("id", id);
-      if (!error) return;
-    } catch (e) {
-      console.warn("Update directo en Supabase falló por RLS, intentando vía servidor...", e);
-    }
-
-    const res = await fetch(`/api/db/cierres/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(rowUpdates)
-    });
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error || "Error al actualizar cierre en el servidor");
-    }
+    await api(`/api/db/cierres/${encodeURIComponent(id)}`, { method: "PUT", json: rowUpdates });
   },
 
   async deleteCierre(id: string): Promise<void> {
-    // Anulación en vez de DELETE físico (dato financiero auditable)
-    try {
-      const { error } = await supabase
-        .from("cierres_caja")
-        .update({ estado: "Anulado" })
-        .eq("id", id);
-      if (!error) return;
-    } catch (e) {
-      console.warn("Anular directo en Supabase falló por RLS, usando servidor...", e);
-    }
-
-    const res = await fetch(`/api/db/cierres/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ estado: "Anulado" })
-    });
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error || "Error al anular cierre en el servidor");
-    }
+    // Anulación en vez de DELETE físico (dato financiero auditable). Solo Gerencia.
+    await api(`/api/db/cierres/${encodeURIComponent(id)}`, { method: "PUT", json: { estado: "Anulado" } });
   },
 
   // ---- Equipo / usuarios ----
   async getTeamMembers(localNameOrId: string = "Chapinero") {
     const localId = await resolveLocalId(localNameOrId);
-    let members: any[] = [];
-    try {
-      const { data, error } = await supabase
-        .from("usuarios")
-        .select("*")
-        .eq("local_id", localId)
-        .order("nombre", { ascending: true });
-
-      if (!error && data && data.length > 0) {
-        members = data;
-      }
-    } catch (e) {
-      console.warn("Supabase directo getTeamMembers falló:", e);
-    }
-
-    if (members.length === 0) {
-      try {
-        const res = await fetch(`/api/db/usuarios?local_id=${encodeURIComponent(localId)}`);
-        if (res.ok) {
-          const json = await res.json();
-          if (json.data && json.data.length > 0) {
-            members = json.data;
-          }
-        }
-      } catch (err) {
-        console.warn("Fallback servidor /api/db/usuarios falló:", err);
-      }
-    }
-
-    return members;
+    const { data } = await api<{ data: any[] }>(`/api/db/usuarios?local_id=${encodeURIComponent(localId)}`);
+    return data;
   },
 
   async saveTeamMember(member: any, localNameOrId: string = "Chapinero") {
     const localId = await resolveLocalId(localNameOrId);
     const cargoMap: Record<string, Cargo> = {
+      "Gerencia": "Gerencia",
+      "gerencia": "Gerencia",
+      "administrador": "Gerencia",
       "gerente": "Gerencia",
       "Gerente": "Gerencia",
       "Líder operador": "Lider Operador",
       "Lider operador": "Lider Operador",
+      "Lider Operador": "Lider Operador",
+      "Lider Pasteleria": "Lider Pasteleria",
+      "Auxiliar Pasteleria": "Auxiliar Pasteleria",
       "Lider de punto": "Lider Operador",
       "Líder de punto": "Lider Operador",
       "Líder de pastelería": "Lider Pasteleria",
@@ -471,35 +281,15 @@ export const dbAdapter = {
       payload.id = member.id;
     }
 
-    if (member.activo !== undefined) {
-      payload.activo = member.activo;
-    }
-    if (member.password) {
-      payload.password = member.password;
-    }
+    if (member.email !== undefined) payload.email = member.email;
 
-    // Guardar vía backend para garantizar sincronización de seguridad y roles sin colisiones de RLS
-    const res = await fetch("/api/db/usuarios", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error || "Error al guardar usuario en el servidor");
-    }
-    const json = await res.json();
-    return json.data;
+    // La clave y el estado de la cuenta se gestionan aparte (securityStore → /api/admin).
+    const { data } = await api<{ data: any }>("/api/db/usuarios", { method: "POST", json: payload });
+    return data;
   },
 
   async deleteTeamMember(usuarioId: string) {
-    const res = await fetch(`/api/db/usuarios/${usuarioId}`, {
-      method: "DELETE"
-    });
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error || "Error al eliminar usuario en el servidor");
-    }
+    await api(`/api/db/usuarios/${encodeURIComponent(usuarioId)}`, { method: "DELETE" });
   },
 
   // ---- Configuración de nómina por colaborador (Persistido en Supabase) ----
@@ -513,68 +303,18 @@ export const dbAdapter = {
   },
 
   async getAllNominaConfigs(): Promise<Record<string, any>> {
-    try {
-      const res = await fetch("/api/db/nomina-config");
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.data) {
-          return json.data;
-        }
-      }
-    } catch (err) {
-      console.warn("Error consultando /api/db/nomina-config, usando caché local:", err);
-    }
-
-    try {
-      const localStored = localStorage.getItem("lopez_gracia_hr_profiles_config_v2");
-      if (localStored) return JSON.parse(localStored);
-    } catch {}
-    return {};
+    const { data } = await api<{ data: Record<string, any> }>("/api/db/nomina-config");
+    return data || {};
   },
 
   async saveNominaConfig(usuarioId: string, config: any) {
-    try {
-      await fetch("/api/db/nomina-config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ usuarioId, config })
-      });
-    } catch (err) {
-      console.warn("Error guardando nómina config vía servidor:", err);
-    }
+    await api("/api/db/nomina-config", { method: "POST", json: { usuarioId, config } });
   },
 
   // ---- Historial de liquidaciones ----
   async getTurnosNomina(localNameOrId: string = "Chapinero") {
     const localId = await resolveLocalId(localNameOrId);
-    let rows: any[] = [];
-    try {
-      const { data, error } = await supabase
-        .from("turnos_nomina")
-        .select("*, usuarios(nombre, cargo)")
-        .eq("local_id", localId)
-        .order("fecha_fin", { ascending: false });
-
-      if (!error && data && data.length > 0) {
-        rows = data;
-      }
-    } catch (e) {
-      console.warn("Error en supabase directo para getTurnosNomina:", e);
-    }
-
-    if (rows.length === 0) {
-      try {
-        const res = await fetch(`/api/db/turnos-nomina?local_id=${encodeURIComponent(localId)}`);
-        if (res.ok) {
-          const json = await res.json();
-          if (json.data && json.data.length > 0) {
-            rows = json.data;
-          }
-        }
-      } catch (err) {
-        console.warn("Fallback servidor /api/db/turnos-nomina falló:", err);
-      }
-    }
+    const { data: rows } = await api<{ data: any[] }>(`/api/db/turnos-nomina?local_id=${encodeURIComponent(localId)}`);
 
     return rows.map((row: any) => ({
       id: row.id,
@@ -610,91 +350,32 @@ export const dbAdapter = {
       ai_analysis: turno.aiAnalysis || null
     };
 
-    try {
-      const { data, error } = await supabase
-        .from("turnos_nomina")
-        .insert(payload)
-        .select()
-        .single();
-
-      if (!error && data) return data;
-    } catch (e) {
-      console.warn("Guardar turno nómina directo falló por RLS, guardando vía servidor...", e);
-    }
-
-    const res = await fetch("/api/db/turnos-nomina", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error || "Error al guardar turno nómina en el servidor");
-    }
-    const json = await res.json();
-    return json.data;
+    const { data } = await api<{ data: any }>("/api/db/turnos-nomina", { method: "POST", json: payload });
+    return data;
   },
 
   async deleteTurnoNomina(id: string) {
-    try {
-      const { error } = await supabase
-        .from("turnos_nomina")
-        .delete()
-        .eq("id", id);
-      if (!error) return;
-    } catch (e) {
-      console.warn("Eliminar turno directo falló, usando servidor...", e);
-    }
-
-    const res = await fetch(`/api/db/turnos-nomina/${encodeURIComponent(id)}`, {
-      method: "DELETE"
-    });
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error || "Error al eliminar turno nómina en el servidor");
-    }
+    await api(`/api/db/turnos-nomina/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
   // ---- Configuración SMMLV / Aux. transporte (Persistido en Supabase) ----
-  async getConfiguracionNomina(_localNameOrId: string = "Chapinero") {
-    try {
-      const res = await fetch("/api/db/configuracion-nomina");
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.data) {
-          return json.data;
-        }
-      }
-    } catch (err) {
-      console.warn("Error obteniendo /api/db/configuracion-nomina:", err);
-    }
-    return { smmlv_base: 1750905, aux_transporte_base: 249095 };
+  async getConfiguracionNomina(_localNameOrId: string = "Chapinero"): Promise<{ smmlv_base: number; aux_transporte_base: number }> {
+    const { data } = await api<{ data: { smmlv_base: number; aux_transporte_base: number } }>("/api/db/configuracion-nomina");
+    return data;
   },
 
   async saveConfiguracionNomina(_localNameOrId: string = "Chapinero", smmlvBase: number, auxTransporteBase: number) {
-    try {
-      await fetch("/api/db/configuracion-nomina", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ smmlv_base: smmlvBase, aux_transporte_base: auxTransporteBase })
-      });
-    } catch (err) {
-      console.warn("Error guardando configuración nómina vía servidor:", err);
-    }
+    await api("/api/db/configuracion-nomina", {
+      method: "POST",
+      json: { smmlv_base: smmlvBase, aux_transporte_base: auxTransporteBase },
+    });
   },
 
   // ---- Puntos por cargo ----
   async getCargoPuntos(): Promise<Record<string, number>> {
-    const { data, error } = await supabase.from("cargo_puntos").select("*");
-    if (error) {
-      console.error("Error al obtener cargo puntos de Supabase:", error);
-      throw error;
-    }
-
+    const { data } = await api<{ data: any[] }>("/api/db/cargo-puntos");
     const map: Record<string, number> = {};
-    (data || []).forEach((row: any) => {
-      map[row.cargo] = Number(row.puntos);
-    });
+    for (const row of data) map[row.cargo] = Number(row.puntos);
     return map;
   }
 };

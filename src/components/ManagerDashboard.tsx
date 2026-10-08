@@ -315,7 +315,6 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
   // Formulario para registrar nuevo miembro (Ficha Laboral)
   const [newMemberName, setNewMemberName] = useState("");
   const [newMemberCedula, setNewMemberCedula] = useState("");
-  const [newMemberPassword, setNewMemberPassword] = useState("tienda");
   const [newMemberRole, setNewMemberRole] = useState<UserRole>("Asistente de Servicio");
   const [newMemberArea, setNewMemberArea] = useState<"Ventas" | "Pastelería">("Ventas");
   const [newMemberTipoContrato, setNewMemberTipoContrato] = useState<string>("Indefinido");
@@ -4461,6 +4460,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                 });
               }
               await loadTeamMembers();
+              return saved;
             }}
             onReload={loadTeamMembers}
           />
