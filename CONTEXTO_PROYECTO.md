@@ -95,17 +95,17 @@ El aplicativo implementa una arquitectura cliente-servidor moderna de alto rendi
 
 ### 3.1. Conciliación y Arqueo de Caja
 
-La conciliación diaria cruza los valores físicos reportados por el equipo en el punto de venta contra los datos arrojados por el sistema POS:
+La conciliación diaria cruza los valores reportados en el cierre contra las fuentes oficiales de lectura (IntuiPOS API, Justo API directa y verificación manual):
 
-$$\text{Diferencia} = \text{Valor Arqueo Físico} - \text{Valor Reporte POS}$$
+$$\text{Diferencia} = \text{Valor Reportado / API Directa} - \text{Valor Lectura IntuiPOS}$$
 
-| Canal / Método de Pago | Origen Físico | Origen POS | Implicación del Descuadre |
+| Canal / Método de Pago | Columna 1: Reporte Directo / Manual | Columna 2: Lectura POS (IntuiPOS API) | Regla de Conciliación |
 | :--- | :--- | :--- | :--- |
-| **Efectivo** | Conteo de billetes y monedas en caja | Total efectivo facturado en POS | Un faltante implica dinero faltante en caja. |
-| **Datáfono / Tarjetas** | Sumatoria de vouchers emitidos por el terminal físico | Total tarjetas facturado en POS | Desfases por vouchers no pasados o doble cobro. |
-| **Justo** | Reporte de cierre de la app Justo | Facturación registrada bajo Justo en POS | Pedidos no cerrados o pedidos anulados en plataforma. |
-| **Rappi** | Reporte de cierre del portal Rappi Aliados | Facturación Rappi en POS | Descuadre por comisiones, cancelaciones o pedidos pendientes. |
-| **Transferencias** | Comprobantes de Nequi, Daviplata o Bancolombia | Facturación por transferencias en POS | Comprobantes duplicados o transferencias no confirmadas. |
+| **Efectivo** | Conteo de billetes y monedas en caja (Input Manual) | Total efectivo facturado en IntuiPOS | Un faltante implica dinero físico faltante en caja. |
+| **Datáfono / Tarjetas** | Sumatoria auditada manualmente (vouchers físicos) | N/A (No requiere doble casilla en POS) | Se audita por confirmación e input manual directo contra los vouchers. |
+| **Justo** | **API Directa Justo** (`/api/pos/justo` - `gross_sales`) | **JustoPOS API** (Facturación Justo en IntuiPOS) | Compara las órdenes reales de Justo contra lo ingresado en el POS. |
+| **Rappi** | Pendiente API Directa Rappi (Sin conexión directa aún) | **RappiPOS API** (Lectura de ventas Rappi en IntuiPOS) | Actualmente solo se cuenta con la lectura POS de Rappi desde IntuiPOS. |
+| **Transferencias** | Suma auditada manualmente a partir de bauchers/comprobantes | N/A (No requiere casilla POS) | Se audita manualmente verificando cada baucher (Nequi, Bancolombia, Daviplata). |
 
 #### Política de Descuadres (Regla 60/40 con Validación de Roles)
 Cuando se registra un **faltante de efectivo**, el sistema aplica automáticamente la política de responsabilidad compartida con segregación estricta de funciones operativas:
