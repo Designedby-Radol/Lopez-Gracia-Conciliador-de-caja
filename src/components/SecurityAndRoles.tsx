@@ -36,7 +36,9 @@ import {
   securityStore, 
   SYSTEM_ROLE_PERMISSIONS, 
   RolePermissionsConfig, 
-  SecurityAuditEntry 
+  SecurityAuditEntry,
+  normalizeSystemRole,
+  CanonicalSystemRole
 } from "../utils/securityStore";
 
 interface SecurityAndRolesProps {
@@ -135,7 +137,8 @@ export default function SecurityAndRoles({
   const filteredMembers = teamMembers.filter((member) => {
     const nameMatch = (member.nombre || "").toLowerCase().includes(searchQuery.toLowerCase());
     const cedulaMatch = (member.cedula || "").toLowerCase().includes(searchQuery.toLowerCase());
-    const roleMatch = roleFilter === "all" || member.role === roleFilter || member.cargo === roleFilter;
+    const memberCanonicalRole = normalizeSystemRole(member.cargo || member.role);
+    const roleMatch = roleFilter === "all" || memberCanonicalRole === roleFilter || member.role === roleFilter || member.cargo === roleFilter;
     const suspended = isMemberSuspended(member);
     const statusMatch = 
       statusFilter === "all" ||
@@ -540,7 +543,7 @@ export default function SecurityAndRoles({
                     </tr>
                   ) : (
                     filteredMembers.map((member) => {
-                      const userRole = member.role || member.cargo || "Asistente de Servicio";
+                      const userRole = normalizeSystemRole(member.cargo || member.role);
                       const roleConfig = SYSTEM_ROLE_PERMISSIONS[userRole] || SYSTEM_ROLE_PERMISSIONS["Asistente de Servicio"];
                       const userPass = securityStore.getPasswordForUser(member.cedula || member.nombre);
                       const isPassVisible = !!visiblePasswords[member.id];
@@ -994,8 +997,8 @@ export default function SecurityAndRoles({
 
       {/* MODAL: Cambiar Contraseña / Resetear PIN */}
       {selectedUserForPassword && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white border-2 border-brand-ink w-full max-w-md shadow-[6px_6px_0px_0px_#1C1917] p-6 space-y-4">
+        <div className="fixed inset-0 md:left-64 z-50 bg-black/60 flex items-center justify-center p-4 sm:p-6 md:p-8 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white border-2 border-brand-ink w-full max-w-md shadow-[6px_6px_0px_0px_#1C1917] p-6 space-y-4 my-auto">
             <div className="flex items-center justify-between border-b border-brand-ink/10 pb-3">
               <div className="flex items-center space-x-2">
                 <Key className="w-5 h-5 text-amber-600" />
@@ -1081,8 +1084,8 @@ export default function SecurityAndRoles({
 
       {/* MODAL: Nueva Cuenta de Acceso */}
       {isAddUserModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white border-2 border-brand-ink w-full max-w-lg shadow-[6px_6px_0px_0px_#1C1917] p-6 space-y-4">
+        <div className="fixed inset-0 md:left-64 z-50 bg-black/60 flex items-center justify-center p-4 sm:p-6 md:p-8 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white border-2 border-brand-ink w-full max-w-lg shadow-[6px_6px_0px_0px_#1C1917] p-6 space-y-4 my-auto">
             <div className="flex items-center justify-between border-b border-brand-ink/10 pb-3">
               <div className="flex items-center space-x-2">
                 <UserPlus className="w-5 h-5 text-emerald-700" />
@@ -1190,8 +1193,8 @@ export default function SecurityAndRoles({
 
       {/* MODAL: Confirmar Eliminación */}
       {userToDelete && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white border-2 border-brand-ink w-full max-w-sm shadow-[6px_6px_0px_0px_#1C1917] p-6 space-y-4">
+        <div className="fixed inset-0 md:left-64 z-50 bg-black/60 flex items-center justify-center p-4 sm:p-6 md:p-8 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white border-2 border-brand-ink w-full max-w-sm shadow-[6px_6px_0px_0px_#1C1917] p-6 space-y-4 my-auto">
             <div className="flex items-center space-x-2 text-red-600">
               <AlertTriangle className="w-5 h-5 shrink-0" />
               <h3 className="text-sm font-black uppercase tracking-wider text-brand-ink">

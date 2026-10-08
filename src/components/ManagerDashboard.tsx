@@ -60,7 +60,7 @@ import { jsPDF } from "jspdf";
 import * as pdfjsLib from "pdfjs-dist";
 // @ts-ignore
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { dbAdapter } from "../db/dbAdapter";
+import { dbAdapter, resolveLocalId } from "../db/dbAdapter";
 import { CierreCaja, UserRole } from "../types";
 import Logo from "./Logo";
 import PDFUploader from "./PDFUploader";
@@ -79,6 +79,7 @@ import SalariesManager, {
   parseNumberFromDots
 } from "./SalariesManager";
 import SecurityAndRoles from "./SecurityAndRoles";
+import { EmployeeProfilesManager } from "./EmployeeProfilesManager";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -148,6 +149,8 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
   const [reconcileTransferencias, setReconcileTransferencias] = useState<number>(0);
   const [reconcileJusto, setReconcileJusto] = useState<number>(0);
   const [reconcileRappi, setReconcileRappi] = useState<number>(0);
+  const [transferenciasCoincide, setTransferenciasCoincide] = useState<boolean>(false);
+  const [isLoadingCanales, setIsLoadingCanales] = useState<boolean>(false);
 
   const [metaVentas, setMetaVentas] = useState<number>(10000000); // Meta por defecto: 10M COP
   const [isEditingMeta, setIsEditingMeta] = useState(false);
@@ -807,8 +810,19 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     loadCierres();
   }, []);
 
-  const handleSelectCierre = (id: string) => {
+  useEffect(() => {
+    if (activeTab === "audit" && auditSubTab === "pending" && !selectedCierreId && cierres.length > 0) {
+      const firstPending = cierres.find(c => c.estado !== "Cuadrado" && c.estado !== "Anulado");
+      if (firstPending) {
+        handleSelectCierre(firstPending.id);
+      }
+    }
+  }, [activeTab, auditSubTab, cierres, selectedCierreId]);
+
+  const handleSelectCierre = async (id: string) => {
     setSelectedCierreId(id);
+    setTransferenciasCoincide(false);
+
     const selected = cierres.find(c => c.id === id);
     if (selected) {
       setLiderInputName(selected.liderNombre || selected.colaboradorNombre || "");
@@ -826,15 +840,108 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
           transferenciasPOS: selected.transferenciasPOS || 0,
           fileName: selected.posFileName || (isCuadrado ? "Archivo Procesado" : "Ingreso Manual"),
         });
+        setReconcileEfectivo(selected.efectivoPOS || 0);
+        setReconcileDatafono(selected.tarjetasPOS || 0);
+        setReconcileTransferencias(selected.transferenciasPOS || 0);
+        setTransferenciasCoincide(true);
+        setReconcileJusto(selected.justoCierre || 0);
+        setReconcileRappi(selected.rappiCierre || 0);
       } else {
         setPosData(null);
-      }
+        setReconcileEfectivo(selected.efectivoCierre);
+        setReconcileDatafono(selected.datafonoCierre);
+        setReconcileTransferencias(selected.transferenciasCierre || selected.transferenciasPOS || 0);
+        setReconcileJusto(selected.justoCierre || selected.justoPOS || 0);
+        setReconcileRappi(selected.rappiCierre || selected.rappiPOS || 0);
 
-      setReconcileEfectivo(selected.efectivoPOS !== undefined && selected.efectivoPOS !== null ? selected.efectivoPOS : selected.efectivoCierre);
-      setReconcileDatafono(selected.tarjetasPOS !== undefined && selected.tarjetasPOS !== null ? selected.tarjetasPOS : selected.datafonoCierre);
-      setReconcileTransferencias(selected.transferenciasPOS !== undefined && selected.transferenciasPOS !== null ? selected.transferenciasPOS : (selected.transferenciasCierre || 0));
-      setReconcileJusto(selected.justoCierre || 0);
-      setReconcileRappi(selected.rappiCierre || 0);
+        try {
+          setIsLoadingCanales(true);
+          const localIdToUse = selected.localId || selected.local_id || (await resolveLocalId(local));
+          if (localIdToUse && selected.fecha) {
+            const [justoResp, intuiposResp] = await Promise.all([
+              fetch(`/api/canales/justo/ventas?localId=${encodeURIComponent(localIdToUse)}&fecha=${encodeURIComponent(selected.fecha)}`)
+                .then(r => r.json())
+                .catch(err => {
+                  console.warn("Error consultando Justo:", err);
+                  return { configurado: false };
+                }),
+              fetch(`/api/canales/intuipos/ventas?localId=${encodeURIComponent(localIdToUse)}&fecha=${encodeURIComponent(selected.fecha)}`)
+                .then(r => r.json())
+                .catch(err => {
+                  console.warn("Error consultando IntuiPOS:", err);
+                  return { configurado: false };
+                }),
+            ]);
+
+            // Si IntuiPOS está configurado para ese local, poblar la columna POS y auto-completar canales
+            if (intuiposResp?.configurado) {
+              const posJustoVal = intuiposResp.justoPOS || 0;
+              const posRappiVal = intuiposResp.rappiPOS || 0;
+              const posTransfVal = intuiposResp.transferenciasPOS || 0;
+
+              setPosData({
+                efectivoPOS: intuiposResp.efectivoPOS || 0,
+                tarjetasPOS: intuiposResp.tarjetasPOS || 0,
+                justoPOS: posJustoVal,
+                rappiPOS: posRappiVal,
+                transferenciasPOS: posTransfVal,
+                fileName: "API IntuiPOS",
+              });
+              setReconcileEfectivo(intuiposResp.efectivoPOS || 0);
+              // Para tarjetas / datáfonos, la conciliación es contra confirmación manual (vouchers / cierre físico)
+              setReconcileDatafono(selected.datafonoCierre || 0);
+
+              // Auto-completar dato de Justo automáticamente (API Justo o CxC JUSTO del POS)
+              const autoJusto = (justoResp?.configurado && justoResp.totalVentas !== undefined)
+                ? justoResp.totalVentas
+                : posJustoVal;
+              setReconcileJusto(autoJusto);
+
+              // Auto-completar Rappi y Transferencias
+              if (posRappiVal > 0 && (!selected.rappiCierre || selected.rappiCierre === 0)) {
+                setReconcileRappi(posRappiVal);
+              }
+              if (posTransfVal > 0) {
+                setReconcileTransferencias(posTransfVal);
+                setTransferenciasCoincide(true);
+              }
+
+              // Actualizar el cierre en memoria para que la tabla muestre el dato traído automáticamente de las APIs
+              setCierres(prev =>
+                prev.map(c => {
+                  if (c.id === selected.id) {
+                    return {
+                      ...c,
+                      justoCierre: c.justoCierre || autoJusto,
+                      transferenciasCierre: c.transferenciasCierre || posTransfVal,
+                      justoPOS: posJustoVal,
+                      rappiPOS: posRappiVal,
+                      transferenciasPOS: posTransfVal,
+                      efectivoPOS: intuiposResp.efectivoPOS || 0,
+                      tarjetasPOS: intuiposResp.tarjetasPOS || 0,
+                    };
+                  }
+                  return c;
+                })
+              );
+            } else if (justoResp?.configurado && justoResp.totalVentas !== undefined) {
+              setReconcileJusto(justoResp.totalVentas || 0);
+              setCierres(prev =>
+                prev.map(c => {
+                  if (c.id === selected.id) {
+                    return { ...c, justoCierre: c.justoCierre || justoResp.totalVentas };
+                  }
+                  return c;
+                })
+              );
+            }
+          }
+        } catch (canalesErr) {
+          console.warn("No se pudieron cargar canales automáticamente:", canalesErr);
+        } finally {
+          setIsLoadingCanales(false);
+        }
+      }
     } else {
       setLiderInputName("");
       setAuxiliaresInputList([]);
@@ -844,6 +951,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
       setReconcileTransferencias(0);
       setReconcileJusto(0);
       setReconcileRappi(0);
+      setTransferenciasCoincide(false);
     }
     setAuxiliarInputText("");
   };
@@ -876,7 +984,8 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     // Auto-populate reconciliation fields with POS parsed values
     setReconcileEfectivo(extracted.efectivoPOS);
     setReconcileDatafono(extracted.tarjetasPOS);
-    setReconcileTransferencias(extracted.transferenciasPOS);
+    setReconcileTransferencias(0);
+    setTransferenciasCoincide(false);
     setReconcileJusto(0); // Starts at zero as requested
     setReconcileRappi(0);  // Starts at zero as requested
 
@@ -1991,7 +2100,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
         </header>
 
         {/* Content Body Section */}
-        <main className="flex-1 p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto">
+        <main className="flex-1 p-4 md:p-6 lg:p-8 space-y-6 max-w-[1440px] w-full mx-auto">
           {activeTab === "metrics" && (
             /* TAB 1: MODERN NEXUS DASHBOARD */
             <div className="space-y-6">
@@ -2610,55 +2719,80 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                   </button>
                 </div>
               ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="space-y-6 w-full">
                 
-                {/* Columna Izquierda: Lista de Cierres Pendientes */}
-                <div className="lg:col-span-1 space-y-4">
-                  <div className="bg-white border-2 border-brand-ink p-4 shadow-[4px_4px_0px_0px_#1C1917]">
-                    <h3 className="text-xs font-black text-brand-ink uppercase tracking-widest mb-3 flex items-center justify-between">
-                      <span>Cierres Pendientes</span>
-                      <span className="bg-brand-ink text-white px-2.5 py-0.5 text-[10px] uppercase font-mono font-black">
-                        {pendingCierres.length} por conciliar
+                {/* Selector Superior: Cola de Cierres Pendientes por Auditar */}
+                <div className="bg-white border-2 border-brand-ink p-5 shadow-[4px_4px_0px_0px_#1C1917]">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b-2 border-brand-ink/10 pb-3 mb-4">
+                    <div className="flex items-center space-x-2.5">
+                      <span className="text-xs font-black text-brand-ink uppercase tracking-widest flex items-center gap-1.5">
+                        <Clock className="w-4 h-4 text-brand-ink" />
+                        <span>Cierres Pendientes por Auditar</span>
                       </span>
-                    </h3>
-                    
-                    <div className="space-y-2.5 max-h-[480px] overflow-y-auto pr-1">
-                      {pendingCierres.map(c => {
-                        const totalM = c.efectivoCierre + c.datafonoCierre + c.justoCierre + c.rappiCierre + (c.transferenciasCierre || 0);
-                        const isSelected = c.id === selectedCierreId;
-                        return (
-                          <button
-                            key={c.id}
-                            onClick={() => handleSelectCierre(c.id)}
-                            className={`w-full text-left p-4 transition-all duration-150 cursor-pointer flex items-center justify-between ${
-                              isSelected
-                                ? "bg-brand-bg border-2 border-brand-ink text-brand-ink shadow-[2px_2px_0px_0px_#1C1917] font-black"
-                                : "bg-white border border-brand-accent hover:bg-brand-bg text-brand-ink font-bold"
-                            }`}
-                          >
-                            <div className="space-y-1">
-                              <span className="text-xs font-black block text-brand-ink">{c.fecha}</span>
-                              {c.colaboradorNombre && (
-                                <span className="text-[10px] text-brand-accent font-black uppercase tracking-wider block">Por: {c.colaboradorNombre}</span>
-                              )}
-                              <span className="text-[11px] text-brand-ink/60 font-mono block">Flujo: {formatCOP(totalM)}</span>
-                              <span className="text-[10px] text-brand-ink font-bold block">Propinas: {formatCOP(c.propinas)}</span>
-                            </div>
-                            <div className="flex items-center space-x-1.5 text-[10px] uppercase font-mono font-bold text-brand-ink">
-                              <Clock className="w-3.5 h-3.5" />
-                              <span className="hidden sm:inline">Pendiente</span>
-                            </div>
-                          </button>
-                        );
-                      })}
+                      <span className="bg-brand-ink text-white px-2.5 py-0.5 text-[11px] uppercase font-mono font-black">
+                        {pendingCierres.length} {pendingCierres.length === 1 ? "pendiente" : "pendientes"}
+                      </span>
                     </div>
+                    <span className="text-[11px] text-brand-ink/60 font-medium">
+                      Selecciona un cierre para conciliar con el POS
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {pendingCierres.map(c => {
+                      const totalM = c.efectivoCierre + c.datafonoCierre + c.justoCierre + c.rappiCierre + (c.transferenciasCierre || 0);
+                      const isSelected = c.id === selectedCierreId;
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => handleSelectCierre(c.id)}
+                          className={`w-full text-left p-4 transition-all duration-150 cursor-pointer rounded-xs border-2 flex flex-col justify-between ${
+                            isSelected
+                              ? "bg-brand-bg border-2 border-brand-ink text-brand-ink shadow-[3px_3px_0px_0px_#1C1917] ring-1 ring-brand-ink"
+                              : "bg-white border-brand-ink/30 hover:border-brand-ink hover:bg-brand-bg/40 text-brand-ink"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <div>
+                              <span className="text-xs font-black block uppercase tracking-wider text-brand-ink">
+                                {c.fecha}
+                              </span>
+                              {c.colaboradorNombre && (
+                                <span className="text-[10px] font-bold block truncate max-w-[170px] text-brand-ink/70">
+                                  Por: {c.colaboradorNombre}
+                                </span>
+                              )}
+                            </div>
+                            <span className={`px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-xs border ${
+                              isSelected
+                                ? "bg-emerald-100 text-emerald-900 border-emerald-400 font-black"
+                                : "bg-amber-100 text-amber-900 border-amber-300 font-bold"
+                            }`}>
+                              {isSelected ? "En Auditoría" : "Pendiente"}
+                            </span>
+                          </div>
+
+                          <div className="pt-2.5 border-t border-brand-ink/10 flex items-center justify-between text-xs font-mono">
+                            <div>
+                              <span className="text-[9px] uppercase font-sans font-bold block text-brand-ink/50">Total Físico</span>
+                              <span className="font-black text-sm text-brand-ink">{formatCOP(totalM)}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[9px] uppercase font-sans font-bold block text-brand-ink/50">Propinas</span>
+                              <span className="font-bold text-brand-ink">{formatCOP(c.propinas)}</span>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* Columna Derecha: Panel de Auditoría Activa */}
-                <div className="lg:col-span-2">
+                {/* Panel de Auditoría Activa a Ancho Completo */}
+                <div className="w-full">
                   {selectedCierreId && currentCierre ? (
-                    <div className="space-y-6">
+                    <div className="space-y-6 w-full">
                       
                       {/* Detalles del Arqueo Seleccionado */}
                       <div className="bg-white border-2 border-brand-ink p-6 shadow-[4px_4px_0px_0px_#1C1917]">
@@ -2684,26 +2818,26 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                             Valores Reportados por el Equipo (Físico)
                           </h4>
                           
-                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs font-mono">
-                            <div className="bg-white p-2.5 border border-brand-ink">
-                              <span className="text-brand-ink/50 font-black block mb-1">EFECTIVO:</span>
-                              <span className="text-[11px] font-black text-brand-ink">{formatCOP(currentCierre.efectivoCierre)}</span>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 text-xs font-mono">
+                            <div className="bg-white p-3.5 border-2 border-brand-ink/30 rounded-xs">
+                              <span className="text-brand-ink/50 font-black block mb-1 text-[10px] tracking-wider">EFECTIVO:</span>
+                              <span className="text-sm font-black text-brand-ink">{formatCOP(currentCierre.efectivoCierre)}</span>
                             </div>
-                            <div className="bg-white p-2.5 border border-brand-ink">
-                              <span className="text-brand-ink/50 font-black block mb-1">DATÁFONO:</span>
-                              <span className="text-[11px] font-black text-brand-ink">{formatCOP(currentCierre.datafonoCierre)}</span>
+                            <div className="bg-white p-3.5 border-2 border-brand-ink/30 rounded-xs">
+                              <span className="text-brand-ink/50 font-black block mb-1 text-[10px] tracking-wider">DATÁFONO:</span>
+                              <span className="text-sm font-black text-brand-ink">{formatCOP(currentCierre.datafonoCierre)}</span>
                             </div>
-                            <div className="bg-white p-2.5 border border-brand-ink">
-                              <span className="text-brand-ink/50 font-black block mb-1">JUSTO APP:</span>
-                              <span className="text-[11px] font-black text-brand-ink">{formatCOP(currentCierre.justoCierre)}</span>
+                            <div className="bg-white p-3.5 border-2 border-brand-ink/30 rounded-xs">
+                              <span className="text-brand-ink/50 font-black block mb-1 text-[10px] tracking-wider">JUSTO APP:</span>
+                              <span className="text-sm font-black text-brand-ink">{formatCOP(currentCierre.justoCierre)}</span>
                             </div>
-                            <div className="bg-white p-2.5 border border-brand-ink">
-                              <span className="text-brand-ink/50 font-black block mb-1">RAPPI APP:</span>
-                              <span className="text-[11px] font-black text-brand-ink">{formatCOP(currentCierre.rappiCierre)}</span>
+                            <div className="bg-white p-3.5 border-2 border-brand-ink/30 rounded-xs">
+                              <span className="text-brand-ink/50 font-black block mb-1 text-[10px] tracking-wider">RAPPI APP:</span>
+                              <span className="text-sm font-black text-brand-ink">{formatCOP(currentCierre.rappiCierre)}</span>
                             </div>
-                            <div className="bg-white p-2.5 border border-brand-ink">
-                              <span className="text-brand-ink/50 font-black block mb-1">TRANSF.:</span>
-                              <span className="text-[11px] font-black text-brand-ink">{formatCOP(currentCierre.transferenciasCierre || 0)}</span>
+                            <div className="bg-white p-3.5 border-2 border-brand-ink/30 rounded-xs">
+                              <span className="text-brand-ink/50 font-black block mb-1 text-[10px] tracking-wider">TRANSF.:</span>
+                              <span className="text-sm font-black text-brand-ink">{formatCOP(currentCierre.transferenciasCierre || 0)}</span>
                             </div>
                           </div>
 
@@ -2780,27 +2914,35 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                           </p>
 
                           {/* Tabla Comparativa en tiempo real */}
-                          <div className="overflow-x-auto">
+                          {isLoadingCanales && (
+                            <div className="flex items-center space-x-2 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-2 rounded">
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-700 shrink-0" />
+                              <span className="font-semibold">Consultando automáticamente canales digitales (IntuiPOS y Justo)...</span>
+                            </div>
+                          )}
+                          <div className="w-full overflow-x-auto border-2 border-brand-ink/20 rounded-sm bg-white shadow-[2px_2px_0px_0px_#1C1917]">
                             <table className="w-full text-xs text-left border-collapse">
                               <thead>
-                                <tr className="border-b-2 border-brand-ink text-brand-ink/70 uppercase tracking-wider text-[10px] font-black">
-                                  <th className="py-2.5">Canal Recaudo</th>
-                                  <th className="py-2.5 text-right">Cierre Físico (Equipo)</th>
-                                  <th className="py-2.5 text-right">Lectura POS (PDF)</th>
-                                  <th className="py-2.5 text-right w-48">Reales a Conciliar (Admin)</th>
-                                  <th className="py-2.5 text-right">Diferencia Desfase</th>
+                                <tr className="border-b-2 border-brand-ink bg-brand-bg/60 text-brand-ink/80 uppercase tracking-wider text-[10px] font-black">
+                                  <th className="py-3.5 px-5 text-left w-[22%]">Canal Recaudo</th>
+                                  <th className="py-3.5 px-5 text-right whitespace-nowrap w-[18%]">Cierre Físico (Equipo)</th>
+                                  <th className="py-3.5 px-5 text-right whitespace-nowrap w-[18%]">Lectura POS</th>
+                                  <th className="py-3.5 px-5 text-right whitespace-nowrap w-[24%]">Reales a Conciliar (Admin)</th>
+                                  <th className="py-3.5 px-5 text-right whitespace-nowrap w-[18%]">Diferencia Desfase</th>
                                 </tr>
                               </thead>
-                              <tbody className="divide-y-2 divide-brand-bg font-mono">
+                              <tbody className="divide-y divide-brand-bg font-mono">
                                 
                                 {/* Efectivo */}
-                                <tr>
-                                  <td className="py-3 font-sans font-bold text-brand-ink">Efectivo</td>
-                                  <td className="py-3 text-right text-brand-ink font-bold">{formatCOP(currentCierre.efectivoCierre)}</td>
-                                  <td className="py-3 text-right text-zinc-500 font-bold">
+                                <tr className="hover:bg-brand-bg/10 transition-colors">
+                                  <td className="py-3.5 px-5 font-sans font-bold text-brand-ink">Efectivo</td>
+                                  <td className="py-3.5 px-5 text-right text-brand-ink font-bold tabular-nums whitespace-nowrap">
+                                    {formatCOP(currentCierre.efectivoCierre)}
+                                  </td>
+                                  <td className="py-3.5 px-5 text-right text-zinc-500 font-bold tabular-nums whitespace-nowrap">
                                     {posData ? formatCOP(posData.efectivoPOS) : (currentCierre.efectivoPOS !== undefined && currentCierre.efectivoPOS !== null ? formatCOP(currentCierre.efectivoPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
                                   </td>
-                                  <td className="py-2 text-right">
+                                  <td className="py-2.5 px-5 text-right whitespace-nowrap">
                                     <div className="flex justify-end items-center">
                                       <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
                                       <input
@@ -2808,23 +2950,30 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                         value={formatInputNumber(reconcileEfectivo)}
                                         onChange={(e) => updateReconcileField("efectivo", e.target.value)}
                                         placeholder="0"
-                                        className="w-32 text-right font-mono font-bold border-2 border-brand-ink bg-white px-2 py-1 text-xs outline-none focus:bg-emerald-50"
+                                        className="w-32 text-right font-mono font-bold border-2 border-brand-ink bg-white px-2.5 py-1 text-xs outline-none focus:bg-emerald-50"
                                       />
                                     </div>
                                   </td>
-                                  <td className="py-3 text-right font-bold">
+                                  <td className="py-3.5 px-5 text-right font-bold whitespace-nowrap">
                                     {getDiferenciaBadge(currentCierre.efectivoCierre - reconcileEfectivo)}
                                   </td>
                                 </tr>
 
                                 {/* Datáfono */}
-                                <tr>
-                                  <td className="py-3 font-sans font-bold text-brand-ink">Tarjetas / Datáfono</td>
-                                  <td className="py-3 text-right text-brand-ink font-bold">{formatCOP(currentCierre.datafonoCierre)}</td>
-                                  <td className="py-3 text-right text-zinc-500 font-bold">
-                                    {posData ? formatCOP(posData.tarjetasPOS) : (currentCierre.tarjetasPOS !== undefined && currentCierre.tarjetasPOS !== null ? formatCOP(currentCierre.tarjetasPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
+                                <tr className="hover:bg-brand-bg/10 transition-colors">
+                                  <td className="py-3.5 px-5 font-sans font-bold text-brand-ink">
+                                    <span>Tarjetas / Datáfono</span>
+                                    <p className="text-[9px] text-brand-ink/50 font-normal">Auditoría manual por vouchers</p>
                                   </td>
-                                  <td className="py-2 text-right">
+                                  <td className="py-3.5 px-5 text-right text-brand-ink font-bold tabular-nums whitespace-nowrap">
+                                    {formatCOP(currentCierre.datafonoCierre)}
+                                  </td>
+                                  <td className="py-3.5 px-5 text-right font-medium whitespace-nowrap">
+                                    <span className="inline-flex items-center text-[10px] text-zinc-500 bg-zinc-100 border border-zinc-200 px-2 py-0.5 rounded font-sans font-medium">
+                                      N/A (Auditoría manual)
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-5 text-right whitespace-nowrap">
                                     <div className="flex justify-end items-center">
                                       <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
                                       <input
@@ -2832,26 +2981,32 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                         value={formatInputNumber(reconcileDatafono)}
                                         onChange={(e) => updateReconcileField("tarjetas", e.target.value)}
                                         placeholder="0"
-                                        className="w-32 text-right font-mono font-bold border-2 border-brand-ink bg-white px-2 py-1 text-xs outline-none focus:bg-emerald-50"
+                                        className="w-32 text-right font-mono font-bold border-2 border-brand-ink bg-white px-2.5 py-1 text-xs outline-none focus:bg-emerald-50"
                                       />
                                     </div>
                                   </td>
-                                  <td className="py-3 text-right font-bold">
+                                  <td className="py-3.5 px-5 text-right font-bold whitespace-nowrap">
                                     {getDiferenciaBadge(currentCierre.datafonoCierre - reconcileDatafono)}
                                   </td>
                                 </tr>
 
                                 {/* Justo */}
-                                <tr>
-                                  <td className="py-3 font-sans font-bold text-brand-ink">
+                                <tr className="hover:bg-brand-bg/10 transition-colors">
+                                  <td className="py-3.5 px-5 font-sans font-bold text-brand-ink">
                                     <span>Justo App</span>
-                                    <p className="text-[9px] text-brand-ink/50 font-normal">Revisar Portal Justo</p>
+                                    <p className="text-[9px] text-brand-ink/50 font-normal">API Justo v3 / Portal Justo</p>
                                   </td>
-                                  <td className="py-3 text-right text-brand-ink font-bold">{formatCOP(currentCierre.justoCierre)}</td>
-                                  <td className="py-3 text-right text-zinc-500 font-bold">
+                                  <td className="py-3.5 px-5 text-right text-brand-ink font-bold tabular-nums whitespace-nowrap">
+                                    {isLoadingCanales ? (
+                                      <span className="text-[10px] text-brand-ink/50 italic font-sans animate-pulse">Consultando API Justo...</span>
+                                    ) : (
+                                      formatCOP(currentCierre.justoCierre || reconcileJusto || posData?.justoPOS || currentCierre.justoPOS || 0)
+                                    )}
+                                  </td>
+                                  <td className="py-3.5 px-5 text-right text-zinc-500 font-bold tabular-nums whitespace-nowrap">
                                     {posData ? formatCOP(posData.justoPOS) : (currentCierre.justoPOS !== undefined && currentCierre.justoPOS !== null ? formatCOP(currentCierre.justoPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
                                   </td>
-                                  <td className="py-2 text-right">
+                                  <td className="py-2.5 px-5 text-right whitespace-nowrap">
                                     <div className="flex justify-end items-center">
                                       <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
                                       <input
@@ -2859,26 +3014,34 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                         value={formatInputNumber(reconcileJusto)}
                                         onChange={(e) => updateReconcileField("justo", e.target.value)}
                                         placeholder="0"
-                                        className="w-32 text-right font-mono font-bold border-2 border-brand-ink bg-white px-2 py-1 text-xs outline-none focus:bg-emerald-50"
+                                        className="w-32 text-right font-mono font-bold border-2 border-brand-ink bg-white px-2.5 py-1 text-xs outline-none focus:bg-emerald-50"
                                       />
                                     </div>
                                   </td>
-                                  <td className="py-3 text-right font-bold">
+                                  <td className="py-3.5 px-5 text-right font-bold whitespace-nowrap">
                                     {getDiferenciaBadge(reconcileJusto - (posData ? posData.justoPOS : (currentCierre.justoPOS ?? currentCierre.justoCierre ?? 0)))}
                                   </td>
                                 </tr>
 
                                 {/* Rappi */}
-                                <tr>
-                                  <td className="py-3 font-sans font-bold text-brand-ink">
+                                <tr className="hover:bg-brand-bg/10 transition-colors">
+                                  <td className="py-3.5 px-5 font-sans font-bold text-brand-ink">
                                     <span>Rappi App</span>
-                                    <p className="text-[9px] text-brand-ink/50 font-normal">Revisar Portal Rappi</p>
+                                    <p className="text-[9px] text-brand-ink/50 font-normal">Sin API directa • Lectura POS (CxC RAPPI)</p>
                                   </td>
-                                  <td className="py-3 text-right text-brand-ink font-bold">{formatCOP(currentCierre.rappiCierre)}</td>
-                                  <td className="py-3 text-right text-zinc-500 font-bold">
+                                  <td className="py-3.5 px-5 text-right font-medium whitespace-nowrap">
+                                    {currentCierre.rappiCierre && currentCierre.rappiCierre !== (posData?.rappiPOS || 0) ? (
+                                      <span className="text-brand-ink font-bold tabular-nums">{formatCOP(currentCierre.rappiCierre)}</span>
+                                    ) : (
+                                      <span className="inline-flex items-center text-[10px] text-amber-900 bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded font-sans font-medium">
+                                        Sin API directa (Revisar Portal)
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-3.5 px-5 text-right text-zinc-500 font-bold tabular-nums whitespace-nowrap">
                                     {posData ? formatCOP(posData.rappiPOS) : (currentCierre.rappiPOS !== undefined && currentCierre.rappiPOS !== null ? formatCOP(currentCierre.rappiPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
                                   </td>
-                                  <td className="py-2 text-right">
+                                  <td className="py-2.5 px-5 text-right whitespace-nowrap">
                                     <div className="flex justify-end items-center">
                                       <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
                                       <input
@@ -2886,35 +3049,63 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                         value={formatInputNumber(reconcileRappi)}
                                         onChange={(e) => updateReconcileField("rappi", e.target.value)}
                                         placeholder="0"
-                                        className="w-32 text-right font-mono font-bold border-2 border-brand-ink bg-white px-2 py-1 text-xs outline-none focus:bg-emerald-50"
+                                        className="w-32 text-right font-mono font-bold border-2 border-brand-ink bg-white px-2.5 py-1 text-xs outline-none focus:bg-emerald-50"
                                       />
                                     </div>
                                   </td>
-                                  <td className="py-3 text-right font-bold">
+                                  <td className="py-3.5 px-5 text-right font-bold whitespace-nowrap">
                                     {getDiferenciaBadge(reconcileRappi - (posData ? posData.rappiPOS : (currentCierre.rappiPOS ?? currentCierre.rappiCierre ?? 0)))}
                                   </td>
                                 </tr>
 
                                 {/* Transferencias */}
-                                <tr>
-                                  <td className="py-3 font-sans font-bold text-brand-ink">Transferencias</td>
-                                  <td className="py-3 text-right text-brand-ink font-bold">{formatCOP(currentCierre.transferenciasCierre || 0)}</td>
-                                  <td className="py-3 text-right text-zinc-500 font-bold">
+                                <tr className="hover:bg-brand-bg/10 transition-colors">
+                                  <td className="py-3.5 px-5 font-sans font-bold text-brand-ink">
+                                    <span>Transferencias</span>
+                                    <p className="text-[9px] text-brand-ink/50 font-normal">Auditoría manual por vouchers</p>
+                                  </td>
+                                  <td className="py-3.5 px-5 text-right font-medium whitespace-nowrap">
+                                    <span className="inline-flex items-center text-[10px] text-zinc-500 bg-zinc-100 border border-zinc-200 px-2 py-0.5 rounded font-sans font-medium">
+                                      N/A (Auditoría manual)
+                                    </span>
+                                  </td>
+                                  <td className="py-3.5 px-5 text-right text-zinc-500 font-bold tabular-nums whitespace-nowrap">
                                     {posData ? formatCOP(posData.transferenciasPOS) : (currentCierre.transferenciasPOS !== undefined && currentCierre.transferenciasPOS !== null ? formatCOP(currentCierre.transferenciasPOS) : <span className="text-[10px] text-zinc-400 font-sans italic">Sin POS</span>)}
                                   </td>
-                                  <td className="py-2 text-right">
-                                    <div className="flex justify-end items-center">
-                                      <span className="text-[10px] text-zinc-400 mr-1.5 font-bold font-sans">$</span>
-                                      <input
-                                        type="text"
-                                        value={formatInputNumber(reconcileTransferencias)}
-                                        onChange={(e) => updateReconcileField("transferencias", e.target.value)}
-                                        placeholder="0"
-                                        className="w-32 text-right font-mono font-bold border-2 border-brand-ink bg-white px-2 py-1 text-xs outline-none focus:bg-emerald-50"
-                                      />
+                                  <td className="py-2.5 px-5 text-right whitespace-nowrap">
+                                    <div className="flex items-center justify-end space-x-2">
+                                      <label className="flex items-center space-x-1 cursor-pointer select-none">
+                                        <span className="text-[10px] font-bold text-brand-ink/70">¿Coincide?</span>
+                                        <input
+                                          type="checkbox"
+                                          checked={transferenciasCoincide}
+                                          onChange={(e) => {
+                                            const isChecked = e.target.checked;
+                                            setTransferenciasCoincide(isChecked);
+                                            const posT = posData ? posData.transferenciasPOS : (currentCierre.transferenciasPOS ?? 0);
+                                            setReconcileTransferencias(isChecked ? posT : 0);
+                                          }}
+                                          className="w-4 h-4 accent-[#1E3E30] rounded cursor-pointer"
+                                        />
+                                      </label>
+                                      <div className="flex items-center">
+                                        <span className="text-[10px] text-zinc-400 mr-1 font-bold font-sans">$</span>
+                                        <input
+                                          type="text"
+                                          value={formatInputNumber(reconcileTransferencias)}
+                                          onChange={(e) => {
+                                            const clean = parseInt(e.target.value.replace(/\D/g, ""), 10) || 0;
+                                            setReconcileTransferencias(clean);
+                                            const posT = posData ? posData.transferenciasPOS : (currentCierre.transferenciasPOS ?? 0);
+                                            setTransferenciasCoincide(clean > 0 && clean === posT);
+                                          }}
+                                          placeholder="0"
+                                          className="w-28 text-right font-mono font-bold border-2 border-brand-ink bg-white px-2 py-1 text-xs outline-none focus:bg-emerald-50"
+                                        />
+                                      </div>
                                     </div>
                                   </td>
-                                  <td className="py-3 text-right font-bold">
+                                  <td className="py-3.5 px-5 text-right font-bold whitespace-nowrap">
                                     {getDiferenciaBadge(reconcileTransferencias - (posData ? posData.transferenciasPOS : (currentCierre.transferenciasPOS ?? currentCierre.transferenciasCierre ?? 0)))}
                                   </td>
                                 </tr>
@@ -4173,946 +4364,13 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
         )}
 
         {activeTab === "team" && (
-          <div className="space-y-6">
-            {/* Cabecera de Perfiles de Empleados & Talento Humano */}
-            <div className="bg-white p-6 border-2 border-brand-ink shadow-[4px_4px_0px_0px_#1C1917] flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-black text-brand-ink flex items-center space-x-2">
-                  <Users className="w-6 h-6 text-brand-ink" />
-                  <span>Perfiles de Empleados & Talento Humano</span>
-                </h2>
-                <p className="text-xs text-brand-ink/70 mt-1 font-medium">
-                  Fichas laborales, asignación salarial base, auxilios de transporte, bonificaciones y jornada semanal Ley 2101 (42 hrs). Las credenciales y claves se administran en Seguridad & Roles.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("salarios")}
-                  className="px-3 py-2 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-300 text-xs font-black uppercase rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs"
-                >
-                  <DollarSign className="w-4 h-4 text-purple-700" />
-                  <span>Ir a Nómina & Salarios</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("security")}
-                  className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-black uppercase rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs"
-                >
-                  <Shield className="w-4 h-4 text-emerald-700" />
-                  <span>Seguridad & Roles</span>
-                </button>
-              </div>
-            </div>
-
-            {/* KPI Cards de Talento Humano */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="bg-white border-2 border-brand-ink p-4 shadow-[3px_3px_0px_0px_#1C1917]">
-                <span className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Total Personal</span>
-                <div className="flex items-baseline space-x-1.5 mt-1">
-                  <span className="text-2xl font-black text-brand-ink font-mono">{teamMembers.length}</span>
-                  <span className="text-[11px] font-bold text-emerald-600">({teamMembers.filter(m => m.activo !== false).length} activos)</span>
-                </div>
-              </div>
-
-              <div className="bg-white border-2 border-brand-ink p-4 shadow-[3px_3px_0px_0px_#1C1917]">
-                <span className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Distribución Áreas</span>
-                <div className="flex items-center space-x-2 mt-1.5 text-xs font-bold font-mono">
-                  <span className="px-2 py-0.5 bg-blue-50 text-blue-800 border border-blue-200 rounded">
-                    Ventas: {teamMembers.filter(m => !m.role?.toLowerCase().includes("pasteler") && !m.role?.toLowerCase().includes("cocina")).length}
-                  </span>
-                  <span className="px-2 py-0.5 bg-amber-50 text-amber-900 border border-amber-200 rounded">
-                    Pastelería: {teamMembers.filter(m => m.role?.toLowerCase().includes("pasteler") || m.role?.toLowerCase().includes("cocina")).length}
-                  </span>
-                </div>
-              </div>
-
-              <div className="bg-white border-2 border-brand-ink p-4 shadow-[3px_3px_0px_0px_#1C1917]">
-                <span className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Jornada Ley 2101</span>
-                <div className="flex items-baseline space-x-1 mt-1">
-                  <span className="text-xl font-black text-brand-ink font-mono">42.0h</span>
-                  <span className="text-[10px] font-bold text-zinc-500 uppercase">máx/semana</span>
-                </div>
-              </div>
-
-              <div className="bg-white border-2 border-brand-ink p-4 shadow-[3px_3px_0px_0px_#1C1917]">
-                <span className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Aptos Propinas</span>
-                <div className="flex items-baseline space-x-1.5 mt-1">
-                  <span className="text-2xl font-black text-amber-700 font-mono">
-                    {teamMembers.filter(m => m.aptoPropinas && m.role !== "gerente").length}
-                  </span>
-                  <span className="text-[11px] font-bold text-zinc-500">colaboradores</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Columna Izquierda/Centro: Lista de Colaboradores */}
-              <div className="lg:col-span-2 bg-white border-2 border-brand-ink p-6 shadow-[4px_4px_0px_0px_#1C1917] space-y-4">
-                <div className="flex items-center justify-between border-b border-brand-ink/10 pb-3">
-                  <h3 className="text-sm font-black uppercase tracking-wider text-brand-ink flex items-center space-x-2">
-                    <Users className="w-4 h-4 text-brand-ink" />
-                    <span>Colaboradores Registrados ({teamMembers.length})</span>
-                  </h3>
-                  <button
-                    onClick={loadTeamMembers}
-                    className="p-1 text-brand-ink/60 hover:text-brand-ink hover:bg-zinc-100 rounded transition-colors"
-                    title="Recargar de la base de datos"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="border-2 border-brand-ink overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-[#F5F2EB] border-b-2 border-brand-ink">
-                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink">Colaborador</th>
-                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink">Cargo & Área</th>
-                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink">Salario Base</th>
-                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink text-center">Jornada Ley 2101</th>
-                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink text-center">Propinas</th>
-                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink text-center">Estado</th>
-                        <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-brand-ink text-center w-28">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {teamMembers.length === 0 ? (
-                        <tr>
-                          <td colSpan={7} className="py-8 text-center text-xs font-bold text-zinc-400 italic">
-                            No hay colaboradores registrados en el sistema.
-                          </td>
-                        </tr>
-                      ) : (
-                        teamMembers.map((member, idx) => {
-                          const isGerente = member.role === "gerente";
-                          const config = getEmployeeSalaryConfig(member);
-                          const totalWeeklyHours = calculateTotalWeeklyHours(config.horarioSemanal || []);
-                          const isPasteleria = member.role?.toLowerCase().includes("pasteler") || member.role?.toLowerCase().includes("cocina");
-                          const areaName = config.area || (isPasteleria ? "Pastelería" : "Ventas");
-
-                          return (
-                            <React.Fragment key={idx}>
-                              <tr className="border-b border-brand-ink/10 hover:bg-zinc-50/50">
-                              <td className="py-3 px-3">
-                                <span className="font-sans font-black text-brand-ink text-sm block">
-                                  {member.nombre}
-                                </span>
-                                <div className="flex items-center gap-1.5 mt-0.5">
-                                  {member.cedula ? (
-                                    <span className="text-[9px] font-mono font-bold bg-zinc-100 text-zinc-700 border border-zinc-300 px-1.5 py-0.2 rounded">
-                                      C.C. {member.cedula}
-                                    </span>
-                                  ) : (
-                                    <span className="text-[9px] font-mono text-zinc-400 italic">
-                                      Sin C.C.
-                                    </span>
-                                  )}
-                                  <span className="text-[9px] font-mono text-zinc-400 lowercase">
-                                    • {member.local || "Chapinero"}
-                                  </span>
-                                </div>
-                              </td>
-                              <td className="py-3 px-3">
-                                <div className="space-y-1">
-                                  <select
-                                    value={member.role}
-                                    onChange={(e) => {
-                                      const newRole = e.target.value;
-                                      const newPoints = getRolePoints(newRole);
-                                      const updated = [...teamMembers];
-                                      updated[idx].role = newRole;
-                                      updated[idx].puntosPropinas = newPoints;
-                                      saveTeamMembers(updated);
-
-                                      if (salariesConfig[member.nombre]) {
-                                        handleUpdateSalaryConfig(member.nombre, "role", newRole);
-                                        handleUpdateSalaryConfig(member.nombre, "puntajePropinas", newPoints);
-                                      }
-                                    }}
-                                    className="text-[11px] font-bold border border-zinc-300 rounded px-2 py-1 bg-white outline-none cursor-pointer text-brand-ink hover:border-brand-ink block w-full max-w-[160px]"
-                                  >
-                                    <option value="Líder operador">Líder operador (2.0 pts)</option>
-                                    <option value="Asistente de Servicio">Asistente de Servicio (1.3 pts)</option>
-                                    <option value="Líder de pastelería">Líder de pastelería (1.5 pts)</option>
-                                    <option value="Auxiliar de pastelería">Auxiliar de pastelería (0.8 pts)</option>
-                                    <option value="gerente">Gerente (0.0 pts)</option>
-                                  </select>
-                                  <span className={`inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded border ${
-                                    areaName === "Pastelería"
-                                      ? "bg-amber-50 text-amber-900 border-amber-200"
-                                      : "bg-blue-50 text-blue-900 border-blue-200"
-                                  }`}>
-                                    {areaName}
-                                  </span>
-                                </div>
-                              </td>
-                              <td className="py-3 px-3">
-                                <span className="text-xs font-black font-mono text-brand-ink block">
-                                  ${formatNumberWithDots(config.salarioBaseMensual || smmlvBase)}
-                                </span>
-                                <span className={`text-[9px] font-bold uppercase tracking-wider ${
-                                  config.auxilioTransporteAplica !== false ? "text-emerald-700" : "text-zinc-400"
-                                }`}>
-                                  {config.auxilioTransporteAplica !== false ? "+ Aux. Transporte" : "Sin auxilio"}
-                                </span>
-                              </td>
-                              <td className="py-3 px-3 text-center">
-                                <div className="flex flex-col items-center justify-center">
-                                  <span className="text-xs font-black font-mono px-2 py-0.5 bg-zinc-100 text-zinc-900 rounded border border-zinc-300">
-                                    {totalWeeklyHours.toFixed(1)}h / 42h
-                                  </span>
-                                  <span className={`text-[8px] font-black uppercase tracking-wider mt-0.5 px-1.5 py-0.2 rounded ${
-                                    totalWeeklyHours <= 42 ? "text-emerald-700 bg-emerald-50" : "text-red-700 bg-red-50"
-                                  }`}>
-                                    {totalWeeklyHours <= 42 ? "En regla (42h)" : "Exceso >42h"}
-                                  </span>
-                                </div>
-                              </td>
-                              <td className="py-3 px-3 text-center">
-                                {isGerente ? (
-                                  <span className="text-xs font-bold font-mono text-zinc-400">0.0 pts</span>
-                                ) : (
-                                  <div className="flex flex-col items-center justify-center space-y-1">
-                                    <span className="text-xs font-black font-mono px-2 py-0.5 bg-amber-50 border border-amber-300 text-amber-950 rounded">
-                                      {getRolePoints(member.role)} pts
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const updated = [...teamMembers];
-                                        updated[idx].aptoPropinas = !updated[idx].aptoPropinas;
-                                        saveTeamMembers(updated);
-                                      }}
-                                      className={`px-2 py-0.5 text-[9px] font-black uppercase tracking-wider border rounded cursor-pointer ${
-                                        member.aptoPropinas 
-                                          ? "bg-emerald-50 text-emerald-800 border-emerald-300" 
-                                          : "bg-amber-50 text-amber-900 border-amber-300"
-                                      }`}
-                                    >
-                                      {member.aptoPropinas ? "Apto (Sí)" : "Trainee (No)"}
-                                    </button>
-                                  </div>
-                                )}
-                              </td>
-                              <td className="py-3 px-3 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const updated = [...teamMembers];
-                                    updated[idx].activo = !updated[idx].activo;
-                                    saveTeamMembers(updated);
-                                  }}
-                                  className={`px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider rounded-full border cursor-pointer ${
-                                    member.activo
-                                      ? "bg-green-100 text-green-800 border-green-300"
-                                      : "bg-zinc-100 text-zinc-500 border-zinc-300"
-                                  }`}
-                                >
-                                  {member.activo ? "Activo" : "Inactivo"}
-                                </button>
-                              </td>
-                              <td className="py-3 px-3 text-center">
-                                <div className="flex items-center justify-center space-x-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => setExpandedMemberName(expandedMemberName === member.nombre ? null : member.nombre)}
-                                    className={`px-2 py-1 text-[10px] font-black uppercase rounded flex items-center space-x-1 border cursor-pointer transition-all ${
-                                      expandedMemberName === member.nombre
-                                        ? "bg-brand-ink text-white border-brand-ink"
-                                        : "bg-zinc-100 hover:bg-zinc-200 text-brand-ink border-zinc-300"
-                                    }`}
-                                    title="Editar Ficha Técnica, Salario Base, Bonos y Horario Semanal"
-                                  >
-                                    <Sliders className="w-3 h-3" />
-                                    <span className="hidden sm:inline">Ficha</span>
-                                    {expandedMemberName === member.nombre ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => setActiveTab("salarios")}
-                                    className="p-1 text-purple-700 hover:bg-purple-100 rounded border border-purple-200 transition-colors"
-                                    title="Ver y liquidar en Nómina & Salarios"
-                                  >
-                                    <DollarSign className="w-3.5 h-3.5" />
-                                  </button>
-
-                                  {member.nombre.toLowerCase() !== username.toLowerCase() && (
-                                    deletingMemberName === member.nombre ? (
-                                      <div className="flex items-center space-x-1 bg-red-50 border border-red-300 px-2 py-1 rounded">
-                                        <span className="text-[9px] font-black text-red-700 uppercase">¿Borrar?</span>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleDeleteTeamMember(member.nombre)}
-                                          className="px-2 py-0.5 bg-red-600 hover:bg-red-700 text-white font-black uppercase text-[9px] rounded cursor-pointer transition-all"
-                                        >
-                                          Sí
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => setDeletingMemberName(null)}
-                                          className="px-2 py-0.5 bg-zinc-200 hover:bg-zinc-300 text-zinc-800 font-black uppercase text-[9px] rounded cursor-pointer transition-all"
-                                        >
-                                          No
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => setDeletingMemberName(member.nombre)}
-                                        className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded transition-all cursor-pointer"
-                                        title="Eliminar colaborador del sistema"
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </button>
-                                    )
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-
-                            {expandedMemberName === member.nombre && (
-                              <tr key={`expanded-${idx}`} className="bg-amber-50/20 border-b-2 border-brand-ink">
-                                <td colSpan={7} className="p-3 sm:p-5 space-y-4">
-                                  {(() => {
-                                    const config = getEmployeeSalaryConfig(member);
-                                    const weeklyHours = calculateTotalWeeklyHours(config.horarioSemanal);
-                                    const bonosList = config.bonosConfigurados || [];
-                                    const smmlvBase = Number(localStorage.getItem("lopez_gracia_smmlv_base")) || 1750905;
-                                    const auxTranspBase = Number(localStorage.getItem("lopez_gracia_aux_transp_base")) || 249095;
-
-                                    return (
-                                      <div className="bg-white border-2 border-brand-ink rounded-xl p-5 space-y-5 shadow-md text-left">
-                                        {/* ENCABEZADO FICHA TECNICA */}
-                                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-zinc-200 pb-3">
-                                          <div className="flex items-center space-x-3">
-                                            <div className="w-9 h-9 rounded-lg bg-brand-ink text-white flex items-center justify-center font-black text-xs">
-                                              {member.nombre.substring(0, 2).toUpperCase()}
-                                            </div>
-                                            <div>
-                                              <h4 className="font-black text-sm text-brand-ink flex items-center space-x-2">
-                                                <span>Ficha Técnica y Salarios: {member.nombre}</span>
-                                                {(config.cedula || member.cedula) && (
-                                                  <span className="px-2 py-0.5 bg-zinc-100 border border-zinc-300 font-mono text-[10px] font-bold rounded">
-                                                    C.C. {config.cedula || member.cedula}
-                                                  </span>
-                                                )}
-                                              </h4>
-                                              <p className="text-[11px] text-zinc-500 font-bold">{config.role} • {config.area}</p>
-                                            </div>
-                                          </div>
-
-                                          <div className="flex items-center space-x-2">
-                                            <span className="px-2.5 py-1 bg-zinc-100 border border-zinc-300 text-brand-ink text-[10px] font-black rounded-lg">
-                                              Puntos Propinas: {ROLE_POINTS_MAP[member.role] !== undefined ? ROLE_POINTS_MAP[member.role] : 1.0} pts (Automático)
-                                            </span>
-                                            <span className="px-2.5 py-1 bg-emerald-100 text-emerald-900 text-[10px] font-black rounded-lg">
-                                              Carga: {weeklyHours.toFixed(1)} / 42.0 hrs
-                                            </span>
-                                          </div>
-                                        </div>
-
-                                        {/* BLOQUE 1: PARAMETROS LABORALES & SALARIO */}
-                                        <div className="bg-zinc-50 border border-zinc-200 p-3.5 rounded-xl space-y-3">
-                                          <div className="flex items-center space-x-2 text-zinc-700 font-black text-xs uppercase tracking-wider">
-                                            <Sliders className="w-3.5 h-3.5 text-brand-ink" />
-                                            <span>1. Parámetros Laborales y Salario Base</span>
-                                          </div>
-
-                                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-                                            <div>
-                                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
-                                                Número de Cédula (C.C.)
-                                              </label>
-                                              <input
-                                                type="text"
-                                                value={config.cedula || member.cedula || ""}
-                                                placeholder="Ej. 1020730746"
-                                                onChange={(e) => {
-                                                  const val = e.target.value;
-                                                  handleUpdateSalaryConfig(member.nombre, "cedula", val);
-                                                  const updated = teamMembers.map(m => m.nombre === member.nombre ? { ...m, cedula: val } : m);
-                                                  saveTeamMembers(updated);
-                                                }}
-                                                className="w-full bg-white border border-zinc-300 p-1.5 font-mono font-bold text-xs rounded-lg outline-none focus:border-brand-ink"
-                                              />
-                                            </div>
-
-                                            <div>
-                                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
-                                                Salario Base Mensual (COP)
-                                              </label>
-                                              <div className="flex space-x-1">
-                                                <MoneyInput
-                                                  value={config.salarioBaseMensual}
-                                                  onChange={(val) => handleUpdateSalaryConfig(member.nombre, "salarioBaseMensual", val)}
-                                                  className="w-full bg-white border border-zinc-300 p-1.5 font-mono font-bold text-xs rounded-lg outline-none focus:border-brand-ink"
-                                                />
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleUpdateSalaryConfig(member.nombre, "salarioBaseMensual", smmlvBase)}
-                                                  title={`Asignar SMMLV ($ ${formatNumberWithDots(smmlvBase)} COP)`}
-                                                  className="px-2 bg-zinc-200 hover:bg-zinc-300 text-brand-ink text-[9px] font-black uppercase rounded-lg shrink-0 cursor-pointer"
-                                                >
-                                                  SMMLV
-                                                </button>
-                                              </div>
-                                              <span className="text-[10px] text-zinc-500 font-bold block mt-1">
-                                                $ {formatNumberWithDots(config.salarioBaseMensual || 0)} COP / mes
-                                              </span>
-                                            </div>
-
-                                            <div>
-                                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
-                                                Tipo de Contrato
-                                              </label>
-                                              <select
-                                                value={config.tipoContrato}
-                                                onChange={(e: any) => handleUpdateSalaryConfig(member.nombre, "tipoContrato", e.target.value)}
-                                                className="w-full bg-white border border-zinc-300 p-1.5 font-bold text-xs rounded-lg outline-none cursor-pointer focus:border-brand-ink"
-                                              >
-                                                <option value="Indefinido">Término Indefinido</option>
-                                                <option value="Por días">Por días (Ocasional)</option>
-                                              </select>
-                                            </div>
-
-                                            <div>
-                                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
-                                                Área / Sección
-                                              </label>
-                                              <select
-                                                value={config.area}
-                                                onChange={(e: any) => handleUpdateSalaryConfig(member.nombre, "area", e.target.value)}
-                                                className="w-full bg-white border border-zinc-300 p-1.5 font-bold text-xs rounded-lg outline-none cursor-pointer focus:border-brand-ink"
-                                              >
-                                                <option value="Ventas">Ventas / Tienda</option>
-                                                <option value="Pastelería">Pastelería / Cocina</option>
-                                              </select>
-                                            </div>
-
-                                            <div>
-                                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
-                                                Auxilio de Transporte
-                                              </label>
-                                              <div className="flex items-center space-x-2 pt-1.5">
-                                                <input
-                                                  type="checkbox"
-                                                  checked={config.auxilioTransporteAplica}
-                                                  onChange={(e) => handleUpdateSalaryConfig(member.nombre, "auxilioTransporteAplica", e.target.checked)}
-                                                  className="w-4 h-4 cursor-pointer accent-brand-ink"
-                                                />
-                                                <span className="text-xs font-bold text-zinc-700">
-                                                  {config.auxilioTransporteAplica
-                                                    ? `Aplica ($ ${formatNumberWithDots(auxTranspBase)}/mes)`
-                                                    : "No Aplica"}
-                                                </span>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        </div>
-
-                                        {/* BLOQUE 2: BONOS Y AUXILIOS CONFIGURABLES */}
-                                        <div className="bg-zinc-50 border border-zinc-200 p-3.5 rounded-xl space-y-3">
-                                          <div className="flex items-center justify-between">
-                                            <div className="flex items-center space-x-2 text-zinc-700 font-black text-xs uppercase tracking-wider">
-                                              <Gift className="w-3.5 h-3.5 text-purple-700" />
-                                              <span>2. Bonos y Auxilios Adicionales Configurables</span>
-                                            </div>
-
-                                            <button
-                                              type="button"
-                                              onClick={() => handleAddBonusMember(member.nombre)}
-                                              className="px-2.5 py-1 bg-purple-100 hover:bg-purple-200 text-purple-900 text-[10px] font-black uppercase rounded-lg transition-all flex items-center space-x-1 cursor-pointer"
-                                            >
-                                              <Plus className="w-3 h-3" />
-                                              <span>Agregar Bono</span>
-                                            </button>
-                                          </div>
-
-                                          <div className="bg-purple-50 border border-purple-200 p-2.5 rounded-lg text-xs text-purple-900 font-medium flex items-center space-x-2">
-                                            <Info className="w-4 h-4 text-purple-700 shrink-0" />
-                                            <span>
-                                              <strong>Nota sobre Bonos:</strong> El valor configurado es el <strong>monto mensual total</strong>. En cada nómina quincenal se liquida automáticamente el <strong>50% (mitad en la 1ª quincena y mitad en la 2ª quincena)</strong>.
-                                            </span>
-                                          </div>
-
-                                          {bonosList.length === 0 ? (
-                                            <div className="p-2.5 bg-white border border-dashed border-zinc-300 text-center text-xs text-zinc-400 font-medium rounded-lg">
-                                              Sin bonos o auxilios fijos configurados para este empleado.
-                                            </div>
-                                          ) : (
-                                            <div className="space-y-2">
-                                              {bonosList.map((bono) => (
-                                                <div key={bono.id} className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-center bg-white p-2.5 rounded-lg border border-zinc-200 text-xs">
-                                                  <div>
-                                                    <label className="text-[9px] font-black uppercase text-zinc-500 block">Concepto del Bono</label>
-                                                    <input
-                                                      type="text"
-                                                      value={bono.concepto}
-                                                      onChange={(e) => handleUpdateBonusMember(member.nombre, bono.id, "concepto", e.target.value)}
-                                                      className="w-full bg-zinc-50 border border-zinc-300 p-1 font-bold text-xs rounded outline-none"
-                                                    />
-                                                  </div>
-
-                                                  <div>
-                                                    <label className="text-[9px] font-black uppercase text-zinc-500 block">Monto Mensual (COP)</label>
-                                                    <MoneyInput
-                                                      value={bono.monto}
-                                                      onChange={(val) => handleUpdateBonusMember(member.nombre, bono.id, "monto", val)}
-                                                      className="w-full bg-zinc-50 border border-zinc-300 p-1 font-mono font-bold text-xs rounded outline-none"
-                                                    />
-                                                    <span className="text-[9px] text-purple-800 font-bold block mt-0.5">
-                                                      Pago Quincenal (50%): $ {formatNumberWithDots(Math.round((bono.monto || 0) / 2))} COP
-                                                    </span>
-                                                  </div>
-
-                                                  <div>
-                                                    <label className="text-[9px] font-black uppercase text-zinc-500 block">Tipología de Ley</label>
-                                                    <select
-                                                      value={bono.tipologia}
-                                                      onChange={(e: any) => handleUpdateBonusMember(member.nombre, bono.id, "tipologia", e.target.value)}
-                                                      className={`w-full border p-1 font-black text-xs rounded outline-none cursor-pointer ${
-                                                        bono.tipologia === "Salarial"
-                                                          ? "bg-purple-50 text-purple-900 border-purple-300"
-                                                          : "bg-amber-50 text-amber-900 border-amber-300"
-                                                      }`}
-                                                    >
-                                                      <option value="No Salarial">No Salarial (Art. 128 CST)</option>
-                                                      <option value="Salarial">Salarial (Suma a IBC)</option>
-                                                    </select>
-                                                  </div>
-
-                                                  <div className="flex justify-end pt-2 sm:pt-0">
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => handleDeleteBonusMember(member.nombre, bono.id)}
-                                                      className="p-1 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded transition-all cursor-pointer"
-                                                      title="Eliminar bono"
-                                                    >
-                                                      <Trash2 className="w-3.5 h-3.5" />
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                              ))}
-                                            </div>
-                                          )}
-                                        </div>
-
-                                        {/* BLOQUE 3: HORARIO SEMANAL & TIEMPO DE ALMUERZO / DESCANSO (LEY 2101 - 42 HORAS) */}
-                                        <div className="bg-zinc-50 border border-zinc-200 p-3.5 rounded-xl space-y-3">
-                                          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-                                            <div className="flex items-center space-x-2 text-zinc-700 font-black text-xs uppercase tracking-wider">
-                                              <Clock className="w-3.5 h-3.5 text-blue-700" />
-                                              <span>3. Horario Semanal y Tiempo de Almuerzo / Descanso (Ley 2101)</span>
-                                            </div>
-
-                                            <div className="flex items-center space-x-2">
-                                              <span className="text-[10px] font-black uppercase text-zinc-500">Carga Semanal:</span>
-                                              {weeklyHours <= 42 ? (
-                                                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-black rounded-lg flex items-center space-x-1">
-                                                  <CheckCircle2 className="w-3 h-3 text-emerald-700" />
-                                                  <span>{weeklyHours.toFixed(1)} / 42.0 hrs (Cumple Ley)</span>
-                                                </span>
-                                              ) : (
-                                                <span className="px-2 py-0.5 bg-red-100 text-red-900 border border-red-300 text-[10px] font-black rounded-lg flex items-center space-x-1">
-                                                  <AlertCircle className="w-3 h-3 text-red-700" />
-                                                  <span>{weeklyHours.toFixed(1)} / 42.0 hrs (Exceso +{(weeklyHours - 42).toFixed(1)} hrs)</span>
-                                                </span>
-                                              )}
-                                            </div>
-                                          </div>
-
-                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center bg-white p-2.5 rounded-lg border border-zinc-200 text-xs">
-                                            <div>
-                                              <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
-                                                Día de Descanso Estipulado en Contrato
-                                              </label>
-                                              <select
-                                                value={config.diaDescansoContractual || "Domingo"}
-                                                onChange={(e: any) => {
-                                                  const newRest = e.target.value;
-                                                  handleUpdateSalaryConfig(member.nombre, "diaDescansoContractual", newRest);
-                                                  handleUpdateSalaryConfig(member.nombre, "horarioSemanal", getDefaultSchedule(newRest));
-                                                }}
-                                                className="w-full bg-zinc-50 border border-zinc-300 p-1.5 font-bold text-xs rounded-lg outline-none cursor-pointer"
-                                              >
-                                                <option value="Lunes">Lunes</option>
-                                                <option value="Martes">Martes</option>
-                                                <option value="Miércoles">Miércoles</option>
-                                                <option value="Jueves">Jueves</option>
-                                                <option value="Viernes">Viernes</option>
-                                                <option value="Sábado">Sábado</option>
-                                                <option value="Domingo">Domingo</option>
-                                              </select>
-                                            </div>
-
-                                            <div className="text-[10px] text-zinc-500 leading-snug">
-                                              <strong className="text-zinc-700">Descuento de Almuerzo:</strong> El tiempo de descanso/almuerzo configurado para cada día se descuenta automáticamente del cálculo de horas laborales del turno.
-                                            </div>
-                                          </div>
-
-                                          {/* MATRIZ INTERACTIVA LUNES - DOMINGO CON TIEMPO DE ALMUERZO */}
-                                          <div className="overflow-x-auto bg-white rounded-lg border border-zinc-200">
-                                            <table className="w-full text-left border-collapse text-xs">
-                                              <thead>
-                                                <tr className="bg-zinc-100 border-b border-zinc-200 text-[9px] font-black text-zinc-600 uppercase">
-                                                  <th className="p-2">Día</th>
-                                                  <th className="p-2 text-center">Labora</th>
-                                                  <th className="p-2">Hora Entrada</th>
-                                                  <th className="p-2">Hora Salida</th>
-                                                  <th className="p-2">Tiempo Almuerzo/Descanso</th>
-                                                  <th className="p-2 text-right">Horas Efectivas</th>
-                                                </tr>
-                                              </thead>
-                                              <tbody className="divide-y divide-zinc-200 font-medium">
-                                                {(config.horarioSemanal || getDefaultSchedule(config.diaDescansoContractual)).map((day, idxDay) => {
-                                                  const isRestDay = day.dia === (config.diaDescansoContractual || "Domingo");
-                                                  return (
-                                                    <tr key={day.dia} className={isRestDay ? "bg-amber-50/40" : "hover:bg-zinc-50"}>
-                                                      <td className="p-2 font-bold text-brand-ink flex items-center space-x-1">
-                                                        <span>{day.dia}</span>
-                                                        {isRestDay && (
-                                                          <span className="text-[8px] bg-amber-200 text-amber-900 font-black px-1 py-0.2 rounded">
-                                                            Descanso
-                                                          </span>
-                                                        )}
-                                                      </td>
-                                                      <td className="p-2 text-center">
-                                                        <input
-                                                          type="checkbox"
-                                                          checked={day.activo}
-                                                          onChange={(e) => handleUpdateMemberScheduleDay(member.nombre, idxDay, "activo", e.target.checked)}
-                                                          className="w-3.5 h-3.5 cursor-pointer accent-brand-ink"
-                                                        />
-                                                      </td>
-                                                      <td className="p-2">
-                                                        <input
-                                                          type="time"
-                                                          disabled={!day.activo}
-                                                          value={day.horaEntrada}
-                                                          onChange={(e) => handleUpdateMemberScheduleDay(member.nombre, idxDay, "horaEntrada", e.target.value)}
-                                                          className="bg-zinc-50 border border-zinc-300 p-1 font-mono font-bold rounded text-xs disabled:opacity-40"
-                                                        />
-                                                      </td>
-                                                      <td className="p-2">
-                                                        <input
-                                                          type="time"
-                                                          disabled={!day.activo}
-                                                          value={day.horaSalida}
-                                                          onChange={(e) => handleUpdateMemberScheduleDay(member.nombre, idxDay, "horaSalida", e.target.value)}
-                                                          className="bg-zinc-50 border border-zinc-300 p-1 font-mono font-bold rounded text-xs disabled:opacity-40"
-                                                        />
-                                                      </td>
-                                                      <td className="p-2">
-                                                        <select
-                                                          disabled={!day.activo}
-                                                          value={day.minutosAlmuerzo ?? 60}
-                                                          onChange={(e) => handleUpdateMemberScheduleDay(member.nombre, idxDay, "minutosAlmuerzo", Number(e.target.value))}
-                                                          className="bg-zinc-50 border border-zinc-300 p-1 font-bold rounded text-xs disabled:opacity-40 cursor-pointer"
-                                                        >
-                                                          <option value={0}>0 min (Sin almuerzo)</option>
-                                                          <option value={15}>15 min</option>
-                                                          <option value={30}>30 min</option>
-                                                          <option value={45}>45 min</option>
-                                                          <option value={60}>60 min (1 hora)</option>
-                                                          <option value={90}>90 min (1.5 horas)</option>
-                                                        </select>
-                                                      </td>
-                                                      <td className="p-2 text-right font-mono font-bold text-brand-ink">
-                                                        {day.activo ? `${day.horasCalculadas.toFixed(1)} hrs` : "0.0 hrs"}
-                                                      </td>
-                                                    </tr>
-                                                  );
-                                                })}
-                                              </tbody>
-                                            </table>
-                                          </div>
-                                        </div>
-
-                                        {/* BLOQUE 4: CONDICIONES ESPECIALES */}
-                                        <div className="bg-zinc-50 border border-zinc-200 p-3.5 rounded-xl space-y-2">
-                                          <label className="text-[10px] font-black uppercase text-zinc-700 tracking-wider block">
-                                            4. Información Particular / Novedades Fijas
-                                          </label>
-                                          <textarea
-                                            rows={2}
-                                            placeholder="Ej. 'Tiene bono fijo por auxilio de movilización', 'Turno especial pactado los viernes'"
-                                            value={config.informacionParticular}
-                                            onChange={(e) => handleUpdateSalaryConfig(member.nombre, "informacionParticular", e.target.value)}
-                                            className="w-full bg-white border border-zinc-300 p-2 text-xs font-medium text-brand-ink rounded-lg outline-none focus:border-brand-ink"
-                                          />
-                                        </div>
-                                      </div>
-                                    );
-                                  })()}
-                                </td>
-                              </tr>
-                            )}
-                          </React.Fragment>
-                        );
-                      })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Columna Derecha: Registrar Nuevo Empleado (Ficha Laboral) */}
-              <div className="bg-white border-2 border-brand-ink p-6 shadow-[4px_4px_0px_0px_#1C1917] space-y-4">
-                <div className="border-b border-brand-ink/10 pb-3">
-                  <h3 className="text-sm font-black uppercase tracking-wider text-brand-ink flex items-center space-x-2">
-                    <UserPlus className="w-4 h-4 text-brand-ink" />
-                    <span>Registrar Empleado (Ficha Laboral)</span>
-                  </h3>
-                  <p className="text-[10px] text-zinc-500 mt-1 font-medium">
-                    Crea el perfil contractual y conecta automáticamente con el módulo de nómina. (Las credenciales de acceso al sistema se gestionan en Seguridad & Roles).
-                  </p>
-                </div>
-
-                <form 
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    const nameClean = newMemberName.trim();
-                    if (!nameClean) {
-                      alert("Por favor escribe el nombre del empleado.");
-                      return;
-                    }
-                    if (teamMembers.some(m => m.nombre.toLowerCase() === nameClean.toLowerCase())) {
-                      alert("Ya existe un colaborador registrado con este nombre.");
-                      return;
-                    }
-
-                    const calculatedPoints = getRolePoints(newMemberRole);
-                    const isPasteleria = newMemberArea === "Pastelería" || newMemberRole.toLowerCase().includes("pasteler") || newMemberRole.toLowerCase().includes("cocina");
-
-                    try {
-                      const saved = await dbAdapter.saveTeamMember({
-                        nombre: nameClean,
-                        cedula: newMemberCedula.trim(),
-                        role: newMemberRole as any,
-                        cargo: newMemberRole as any,
-                        local: local,
-                        puntosPropinas: calculatedPoints,
-                        aptoPropinas: newMemberIsEligible,
-                        activo: true
-                      }, local);
-
-                      if (saved?.id) {
-                        await dbAdapter.saveNominaConfig(saved.id, {
-                          nombre: nameClean,
-                          cedula: newMemberCedula.trim(),
-                          role: newMemberRole,
-                          area: newMemberArea,
-                          salarioBaseMensual: newMemberSalario || smmlvBase,
-                          tipoContrato: newMemberTipoContrato,
-                          auxilioTransporteAplica: newMemberAuxTransp,
-                          informacionParticular: "",
-                          bonoFijoQuincenal: 0,
-                          descuentoFijoQuincenal: 0,
-                          puntajePropinas: calculatedPoints,
-                          bonosConfigurados: [],
-                          diaDescansoContractual: newMemberDiaDescanso,
-                          horarioSemanal: [
-                            { dia: "Lunes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Lunes", horasCalculadas: newMemberDiaDescanso === "Lunes" ? 0 : 7 },
-                            { dia: "Martes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Martes", horasCalculadas: newMemberDiaDescanso === "Martes" ? 0 : 7 },
-                            { dia: "Miércoles", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Miércoles", horasCalculadas: newMemberDiaDescanso === "Miércoles" ? 0 : 7 },
-                            { dia: "Jueves", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Jueves", horasCalculadas: newMemberDiaDescanso === "Jueves" ? 0 : 7 },
-                            { dia: "Viernes", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Viernes", horasCalculadas: newMemberDiaDescanso === "Viernes" ? 0 : 7 },
-                            { dia: "Sábado", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Sábado", horasCalculadas: newMemberDiaDescanso === "Sábado" ? 0 : 7 },
-                            { dia: "Domingo", horaEntrada: isPasteleria ? "07:00" : "12:00", horaSalida: isPasteleria ? "15:00" : "19:30", activo: newMemberDiaDescanso !== "Domingo", horasCalculadas: newMemberDiaDescanso === "Domingo" ? 0 : 7 }
-                          ]
-                        });
-                      }
-
-                      await loadTeamMembers();
-                      alert(`¡Empleado "${nameClean}" registrado con éxito en la Ficha Laboral y conectado a Nómina!`);
-                    } catch (err: any) {
-                      console.error("Error al registrar colaborador:", err);
-                      alert("Error al registrar colaborador: " + (err?.message || ""));
-                    }
-                    
-                    // Resetear formulario
-                    setNewMemberName("");
-                    setNewMemberCedula("");
-                    setNewMemberRole("Asistente de Servicio");
-                    setNewMemberArea("Ventas");
-                    setNewMemberTipoContrato("Indefinido");
-                    setNewMemberSalario(smmlvBase);
-                    setNewMemberAuxTransp(true);
-                    setNewMemberDiaDescanso("Domingo");
-                    setNewMemberPoints(getRolePoints("Asistente de Servicio").toString());
-                    setNewMemberIsEligible(true);
-                  }}
-                  className="space-y-4 text-left"
-                >
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
-                        Nombre Completo
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Ej. Andrés Felipe"
-                        value={newMemberName}
-                        onChange={(e) => setNewMemberName(e.target.value)}
-                        className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-bold text-brand-ink outline-none"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
-                        Cédula de Ciudadanía
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Ej. 1020730746"
-                        value={newMemberCedula}
-                        onChange={(e) => setNewMemberCedula(e.target.value)}
-                        className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-mono font-bold text-brand-ink outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
-                        Cargo Operativo
-                      </label>
-                      <select
-                        value={newMemberRole}
-                        onChange={(e: any) => {
-                          const role = e.target.value;
-                          setNewMemberRole(role);
-                          const pts = getRolePoints(role);
-                          setNewMemberPoints(pts.toString());
-                          if (role.toLowerCase().includes("pasteler")) {
-                            setNewMemberArea("Pastelería");
-                          } else if (role !== "gerente") {
-                            setNewMemberArea("Ventas");
-                          }
-                        }}
-                        className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-bold text-brand-ink outline-none cursor-pointer"
-                      >
-                        <option value="Líder operador">Líder operador (2.0 pts)</option>
-                        <option value="Asistente de Servicio">Asistente de Servicio (1.3 pts)</option>
-                        <option value="Líder de pastelería">Líder de pastelería (1.5 pts)</option>
-                        <option value="Auxiliar de pastelería">Auxiliar de pastelería (0.8 pts)</option>
-                        <option value="gerente">Gerente (0.0 pts)</option>
-                      </select>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
-                        Área de Trabajo
-                      </label>
-                      <select
-                        value={newMemberArea}
-                        onChange={(e: any) => setNewMemberArea(e.target.value)}
-                        className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-bold text-brand-ink outline-none cursor-pointer"
-                      >
-                        <option value="Ventas">Ventas (Servicio/Barra)</option>
-                        <option value="Pastelería">Pastelería / Producción</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
-                        Tipo de Contrato
-                      </label>
-                      <select
-                        value={newMemberTipoContrato}
-                        onChange={(e) => setNewMemberTipoContrato(e.target.value)}
-                        className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-bold text-brand-ink outline-none cursor-pointer"
-                      >
-                        <option value="Indefinido">Término Indefinido</option>
-                        <option value="Fijo">Término Fijo</option>
-                        <option value="Por Días">Por Días / Prestación</option>
-                        <option value="Aprendizaje">Contrato de Aprendizaje</option>
-                      </select>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
-                        Día Descanso Semanal
-                      </label>
-                      <select
-                        value={newMemberDiaDescanso}
-                        onChange={(e) => setNewMemberDiaDescanso(e.target.value)}
-                        className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-bold text-brand-ink outline-none cursor-pointer"
-                      >
-                        <option value="Domingo">Domingo</option>
-                        <option value="Lunes">Lunes</option>
-                        <option value="Martes">Martes</option>
-                        <option value="Miércoles">Miércoles</option>
-                        <option value="Jueves">Jueves</option>
-                        <option value="Viernes">Viernes</option>
-                        <option value="Sábado">Sábado</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[10px] font-black uppercase tracking-wider text-brand-ink/75 block">
-                        Salario Base Mensual
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setNewMemberSalario(smmlvBase)}
-                        className="text-[9px] font-bold text-brand-ink/70 hover:text-brand-ink underline cursor-pointer"
-                      >
-                        Usar SMMLV ($1.750.905)
-                      </button>
-                    </div>
-                    <MoneyInput
-                      value={newMemberSalario}
-                      onChange={(v) => setNewMemberSalario(v)}
-                      placeholder="1.750.905"
-                      className="w-full bg-white border-2 border-brand-ink px-3 py-2 text-xs font-mono font-black text-brand-ink outline-none"
-                    />
-                  </div>
-
-                  <div className="space-y-2 pt-1">
-                    <label className="flex items-center space-x-2 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={newMemberAuxTransp}
-                        onChange={(e) => setNewMemberAuxTransp(e.target.checked)}
-                        className="w-4 h-4 border-2 border-brand-ink rounded focus:ring-0 accent-brand-ink"
-                      />
-                      <span className="text-[11px] font-bold text-brand-ink">
-                        Aplica Auxilio Legal de Transporte (+$249.095/mes)
-                      </span>
-                    </label>
-
-                    <label className="flex items-center space-x-2 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={newMemberIsEligible}
-                        onChange={(e) => setNewMemberIsEligible(e.target.checked)}
-                        className="w-4 h-4 border-2 border-brand-ink rounded focus:ring-0 accent-brand-ink"
-                      />
-                      <span className="text-[11px] font-bold text-brand-ink">
-                        Apto para Distribución de Propinas ({getRolePoints(newMemberRole)} pts)
-                      </span>
-                    </label>
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full bg-brand-ink hover:bg-black text-white text-xs font-black uppercase tracking-wider py-3 border-2 border-brand-ink shadow-[3px_3px_0px_0px_#D4D4D8] transition-all cursor-pointer mt-2"
-                  >
-                    Guardar Ficha Laboral del Empleado
-                  </button>
-                </form>
-              </div>
-            </div>
-          </div>
+          <EmployeeProfilesManager
+            teamMembers={teamMembers}
+            currentUsername={username}
+            localName={local}
+            onNavigateTab={(tab) => setActiveTab(tab as any)}
+            onRefreshTeamMembers={loadTeamMembers}
+          />
         )}
 
         {activeTab === "indicadores" && (

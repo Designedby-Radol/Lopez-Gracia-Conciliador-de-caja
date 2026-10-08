@@ -134,3 +134,102 @@ export interface POSReportTemplate {
   fileName: string;
   anulacionesNote?: string;
 }
+
+// ==========================================
+// TALENTO HUMANO, NÓMINA & RRHH INTERFACES
+// ==========================================
+
+export interface BonusConfig {
+  id: string;
+  concepto: string;
+  monto: number;
+  tipologia: "Salarial" | "No Salarial";
+}
+
+export interface DailySchedule {
+  dia: "Lunes" | "Martes" | "Miércoles" | "Jueves" | "Viernes" | "Sábado" | "Domingo";
+  activo: boolean;
+  horaEntrada: string; // e.g. "07:00"
+  horaSalida: string; // e.g. "15:00"
+  minutosAlmuerzo: number; // e.g. 60, 30, 0
+  horasCalculadas: number;
+}
+
+export interface EmployeeHRProfile {
+  telefono?: string;
+  email?: string;
+  direccion?: string;
+  fechaIngreso?: string; // YYYY-MM-DD
+  contactoEmergenciaNombre?: string;
+  contactoEmergenciaTelefono?: string;
+  contactoEmergenciaParentesco?: string;
+  eps?: string; // Sanitas, Compensar, Sura, etc.
+  arl?: string; // Positiva, SURA (Riesgo I/II)
+  fondoPensiones?: string; // Porvenir, Protección, Colfondos, Colpensiones
+  fondoCesantias?: string;
+  tallaUniforme?: string;
+  banco?: string;
+  tipoCuenta?: "Ahorros" | "Corriente" | "Daviplata" | "Nequi";
+  numeroCuenta?: string;
+}
+
+export interface DisciplinarySanction {
+  id: string;
+  fecha: string; // YYYY-MM-DD
+  tipo: "Llamado de Atención Verbal" | "Memorando Escrito" | "Suspensión Disciplinaria" | "Acta de Descargos";
+  gravedad: "Leve" | "Moderada" | "Grave";
+  motivo: string;
+  descripcion: string;
+  compromiso?: string;
+  diasSuspension?: number;
+  estado: "Activa" | "Cumplida" | "Anulada";
+  firmadoPorEmpleado: boolean;
+  registradoPor: string;
+  fechaDescargos?: string;
+}
+
+export interface EmployeeBonusRecord {
+  id: string;
+  fecha: string; // YYYY-MM-DD
+  concepto: string;
+  monto: number;
+  tipologia: "Salarial" | "No Salarial";
+  tipoPago: "Mensual Recurrente" | "Única Vez" | "Por Quincena (50%)";
+  motivo?: string;
+  estado: "Aprobado" | "Pendiente" | "Pagado";
+}
+
+export interface VacationPeriod {
+  id: string;
+  fechaInicio: string; // YYYY-MM-DD
+  fechaFin: string; // YYYY-MM-DD
+  diasHabiles: number;
+  periodoCorrespondiente?: string; // e.g. "2024 - 2025"
+  tipo: "Vacaciones Disfrutadas" | "Vacaciones Compensadas en Dinero" | "Permiso Remunerado" | "Permiso No Remunerado" | "Incapacidad Médica (EPS)" | "Licencia Legal";
+  estado: "Aprobado" | "En Solicitud" | "Tomado" | "Rechazado";
+  observaciones?: string;
+}
+
+export interface EmployeeSalaryConfig {
+  nombre: string;
+  cedula?: string;
+  role: string;
+  area: "Pastelería" | "Ventas";
+  salarioBaseMensual: number;
+  tipoContrato: "Indefinido" | "Por días" | "Término Fijo" | "Obra o Labor";
+  auxilioTransporteAplica: boolean;
+  informacionParticular: string;
+  bonoFijoQuincenal?: number;
+  descuentoFijoQuincenal?: number;
+  puntajePropinas?: number;
+  bonosConfigurados?: BonusConfig[];
+  diaDescansoContractual?: "Lunes" | "Martes" | "Miércoles" | "Jueves" | "Viernes" | "Sábado" | "Domingo";
+  horarioSemanal?: DailySchedule[];
+
+  // Extensión RRHH & Talento Humano
+  hrProfile?: EmployeeHRProfile;
+  sanciones?: DisciplinarySanction[];
+  bonificaciones?: EmployeeBonusRecord[];
+  vacaciones?: VacationPeriod[];
+}
+

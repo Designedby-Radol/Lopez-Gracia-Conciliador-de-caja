@@ -1410,7 +1410,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
               </span>
             </div>
             <div className="bg-white p-3 rounded-xl border border-emerald-200 space-y-1">
-              <span className="font-bold block text-[10px] text-emerald-700 uppercase">Jornada Ley 2101</span>
+              <span className="font-bold block text-[10px] text-emerald-700 uppercase">Jornada Semanal</span>
               <span className="font-black text-sm block pt-1">42 Horas Semanales</span>
               <span className="text-[10px] text-emerald-700 font-bold block">(Divisor 210 hrs/mes)</span>
             </div>
@@ -1982,7 +1982,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                 )}
               </div>
               <p className="text-xs text-zinc-500 mt-1">
-                Administra salarios, tipo de contrato, asignación de rol, bonos salariales/no salariales y horarios semanales bajo la Ley 2101 (42 hrs).
+                Administra salarios, tipo de contrato, asignación de rol, bonos salariales/no salariales y horarios semanales (42 hrs).
               </p>
             </div>
 
@@ -2229,7 +2229,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                     <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
                       <div className="flex items-center space-x-2 text-zinc-700 font-black text-xs uppercase tracking-wider">
                         <Clock className="w-4 h-4 text-blue-700" />
-                        <span>3. Horario Semanal y Día de Descanso (Ley 2101 - 42 Horas)</span>
+                        <span>3. Horario Semanal y Día de Descanso (42 Horas)</span>
                       </div>
 
                       {/* CONTADOR DE HORAS SEMANALES EN TIEMPO REAL */}
@@ -2238,7 +2238,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         {weeklyHours <= 42 ? (
                           <span className="px-2.5 py-1 bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-black rounded-lg flex items-center space-x-1">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
-                            <span>{weeklyHours.toFixed(1)} / 42.0 hrs (Cumple Ley 2101)</span>
+                            <span>{weeklyHours.toFixed(1)} / 42.0 hrs (En Regla)</span>
                           </span>
                         ) : (
                           <span className="px-2.5 py-1 bg-red-100 text-red-900 border border-red-300 text-xs font-black rounded-lg flex items-center space-x-1">
@@ -2506,7 +2506,12 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
       {/* MODAL TIRILLA DE PAGO JSON (FASE 2) */}
       {selectedTirillaJson && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSelectedTirillaJson(null);
+          }}
+          className="fixed inset-0 md:left-64 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 md:p-8 z-50 overflow-y-auto"
+        >
           <div className="bg-white border-2 border-brand-ink rounded-2xl shadow-[8px_8px_0px_0px_#1C1917] max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             {/* Header Modal */}
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-700">

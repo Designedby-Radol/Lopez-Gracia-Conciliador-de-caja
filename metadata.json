@@ -1,6 +1,6 @@
 {
   "name": "prueba 2",
-  "description": "Sistema de gestión operativa, roles, seguridad, conciliación y auditoría para López & Gracia con persistencia en Supabase Cloud.",
+  "description": "Sistema de gestión operativa, roles, seguridad, conciliación, nómina, talento humano (RRHH), bonificaciones, sanciones y auditoría para López & Gracia con persistencia en Supabase Cloud.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

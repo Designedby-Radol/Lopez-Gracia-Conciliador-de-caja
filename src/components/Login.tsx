@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Lock, Eye, EyeOff, ShieldCheck, UserCheck, FileText, Info } from "lucide-react";
+import { Lock, Eye, EyeOff, ShieldCheck, UserCheck, FileText, Info, HelpCircle, X, CheckCircle2, AlertTriangle, ArrowLeft } from "lucide-react";
 import { UserRole, Cargo } from "../types";
 import { supabase } from "../db/supabaseConfig";
 import Logo from "./Logo";
@@ -30,6 +30,12 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   // General State
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  // Forgot Password State
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotIdentifier, setForgotIdentifier] = useState("");
+  const [isSendingForgot, setIsSendingForgot] = useState(false);
+  const [forgotResult, setForgotResult] = useState<{ success: boolean; message: string; isEmailSent?: boolean } | null>(null);
 
   const executeSupabaseLogin = async (identifierInput: string, passwordInput?: string) => {
     setError("");
@@ -82,6 +88,43 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     setLoginCedula(emailOrCedula);
     setLoginPassword("••••••••");
     executeSupabaseLogin(emailOrCedula);
+  };
+
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotIdentifier.trim()) return;
+
+    setIsSendingForgot(true);
+    setForgotResult(null);
+
+    try {
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: forgotIdentifier.trim() }),
+      });
+
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setForgotResult({
+          success: true,
+          message: json.message,
+          isEmailSent: json.resetEmailSent
+        });
+      } else {
+        setForgotResult({
+          success: false,
+          message: json.error || "No se pudo procesar la solicitud de restablecimiento."
+        });
+      }
+    } catch (err: any) {
+      setForgotResult({
+        success: false,
+        message: err.message || "Error de conexión con el servidor."
+      });
+    } finally {
+      setIsSendingForgot(false);
+    }
   };
 
   return (
@@ -143,9 +186,22 @@ export default function Login({ onLoginSuccess }: LoginProps) {
               </div>
 
               <div>
-                <label className="block text-[10px] font-black text-[#1C2E24]/60 uppercase tracking-widest mb-2">
-                  Contraseña
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-[10px] font-black text-[#1C2E24]/60 uppercase tracking-widest">
+                    Contraseña
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForgotIdentifier(loginCedula);
+                      setForgotResult(null);
+                      setShowForgotModal(true);
+                    }}
+                    className="text-[11px] font-bold text-[#1E3E30] hover:underline cursor-pointer"
+                  >
+                    ¿Olvidaste tu contraseña?
+                  </button>
+                </div>
                 <div className="relative">
                   <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-zinc-400">
                     <Lock className="w-4.5 h-4.5" />
@@ -250,6 +306,126 @@ export default function Login({ onLoginSuccess }: LoginProps) {
           </div>
         </div>
       </div>
+
+      {/* Modal de Recuperación de Contraseña */}
+      {showForgotModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border-2 border-brand-ink rounded-2xl max-w-md w-full p-6 shadow-[8px_8px_0px_0px_#1C1917] space-y-4">
+            <div className="flex items-center justify-between border-b border-brand-ink/10 pb-3">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 border border-amber-300 flex items-center justify-center">
+                  <HelpCircle className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-brand-ink uppercase tracking-wider">
+                    Recuperación de Contraseña
+                  </h3>
+                  <p className="text-[11px] text-zinc-500 font-medium">
+                    Servicio de soporte y credenciales de acceso
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowForgotModal(false)}
+                className="p-1 text-zinc-400 hover:text-brand-ink transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {forgotResult ? (
+              <div className="space-y-4">
+                <div className={`p-4 rounded-xl border text-xs ${
+                  forgotResult.success
+                    ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+                    : "bg-red-50 border-red-300 text-red-900"
+                }`}>
+                  <div className="flex items-start space-x-2.5">
+                    {forgotResult.success ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <span className="font-bold block mb-1">
+                        {forgotResult.success ? "Solicitud procesada con éxito" : "Aviso de validación"}
+                      </span>
+                      <p className="text-[11px] leading-relaxed">
+                        {forgotResult.message}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-zinc-50 p-3.5 rounded-xl border border-brand-ink/10 text-[11px] text-zinc-600 space-y-1">
+                  <span className="font-bold text-brand-ink block">
+                    ¿Cómo restablece la clave el Gerente?
+                  </span>
+                  <p>
+                    1. El Gerente ingresa al Dashboard con su cuenta de Gerencia.
+                  </p>
+                  <p>
+                    2. En la barra lateral, hace clic en <strong>"Seguridad & Roles"</strong>.
+                  </p>
+                  <p>
+                    3. Localiza al colaborador y hace clic en <strong>"Resetear Clave"</strong> para asignarle una nueva contraseña o PIN al instante.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowForgotModal(false)}
+                  className="w-full py-2.5 bg-brand-ink text-white text-xs font-black uppercase tracking-wider rounded-xl cursor-pointer hover:bg-zinc-800 transition-colors"
+                >
+                  Entendido, volver al login
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
+                <p className="text-xs text-zinc-600 leading-relaxed">
+                  Ingresa tu correo electrónico registrado o número de cédula. Si tienes correo registrado en Supabase Auth, se te enviará un enlace de recuperación. De lo contrario, te mostraremos las instrucciones de restablecimiento inmediato con Gerencia.
+                </p>
+
+                <div>
+                  <label className="block text-[10px] font-black text-[#1C2E24]/60 uppercase tracking-widest mb-1.5">
+                    Correo o Cédula del Colaborador
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. floralbapuyo@gmail.com o 1020730746"
+                    value={forgotIdentifier}
+                    onChange={(e) => setForgotIdentifier(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-200 focus:border-[#1E3E30] focus:bg-white rounded-xl text-[#1C2E24] text-xs font-semibold outline-none transition-all"
+                  />
+                </div>
+
+                <div className="flex items-center space-x-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotModal(false)}
+                    className="w-1/3 py-2.5 border border-zinc-300 text-zinc-700 text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-zinc-50 cursor-pointer transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSendingForgot}
+                    className="w-2/3 py-2.5 bg-[#1E3E30] hover:bg-[#1E3E30]/90 text-white text-xs font-black uppercase tracking-wider rounded-xl cursor-pointer disabled:opacity-50 transition-all flex items-center justify-center space-x-1.5"
+                  >
+                    {isSendingForgot ? (
+                      <span>Consultando...</span>
+                    ) : (
+                      <span>Consultar & Recuperar</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

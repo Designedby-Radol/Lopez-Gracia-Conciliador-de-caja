@@ -47,7 +47,68 @@ export async function resolveLocalId(localNameOrId?: string): Promise<string> {
   return clean;
 }
 
+export function isValidUUID(val?: string | null): boolean {
+  if (!val || typeof val !== "string") return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());
+}
+
+export function getFriendlyName(emailOrName?: string | null): string {
+  if (!emailOrName) return "";
+  const lower = emailOrName.toLowerCase();
+  if (lower.includes("raulsantiago")) return "Raúl Santiago Ramírez";
+  if (lower.includes("floralba")) return "Flor Alba Puyo";
+  if (lower.includes("sofiaramirez") || lower.includes("sofia")) return "Sofía Ramírez";
+  if (lower.includes("1020730746")) return "Colaborador (1020730746)";
+  if (emailOrName.includes("@")) {
+    return emailOrName.split("@")[0];
+  }
+  return emailOrName;
+}
+
+async function resolveUserId(nameOrIdentifier?: string | null): Promise<string | null> {
+  if (!nameOrIdentifier || typeof nameOrIdentifier !== "string") return null;
+  const clean = nameOrIdentifier.trim();
+  if (isValidUUID(clean)) return clean;
+
+  try {
+    const members = await dbAdapter.getTeamMembers();
+    const cleanLower = clean.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const cleanAlpha = cleanLower.replace(/[^a-z0-9]/g, "");
+
+    const found = members.find(m => {
+      const nom = (m.nombre || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const nomAlpha = nom.replace(/[^a-z0-9]/g, "");
+      const em = (m.email || "").toLowerCase();
+      const ced = String(m.cedula || "").trim();
+
+      if (nom === cleanLower) return true;
+      if (em === cleanLower) return true;
+      if (ced && (clean.includes(ced) || ced === clean)) return true;
+      if (cleanAlpha.length >= 3 && (nomAlpha.includes(cleanAlpha) || cleanAlpha.includes(nomAlpha))) return true;
+      if (cleanLower.includes("raulsantiago") && nom.includes("raulsantiago")) return true;
+      if (cleanLower.includes("floralba") && nom.includes("floralba")) return true;
+      if (cleanLower.includes("sofia") && nom.includes("sofia")) return true;
+      if (cleanLower.includes("1020730746") && nom.includes("1020730746")) return true;
+      return false;
+    });
+    if (found && found.id && isValidUUID(found.id)) {
+      return found.id;
+    }
+  } catch (e) {
+    console.warn("No se pudo resolver usuario desde teamMembers:", e);
+  }
+  return null;
+}
+
 function fromDbRow(row: any): CierreCaja {
+  const colabName = row.colaborador?.nombre 
+    ? getFriendlyName(row.colaborador.nombre) 
+    : (getFriendlyName(row.colaboradorNombre) || "Colaborador");
+
+  const auditorName = row.auditor?.nombre 
+    ? getFriendlyName(row.auditor.nombre) 
+    : (row.auditado_por && !isValidUUID(row.auditado_por) ? row.auditado_por : (getFriendlyName(row.auditado_por) || undefined));
+
   return {
     id: row.id,
     fecha: row.fecha,
@@ -55,7 +116,7 @@ function fromDbRow(row: any): CierreCaja {
     local_id: row.local_id,
     colaboradorId: row.colaborador_id,
     colaborador_id: row.colaborador_id,
-    colaboradorNombre: row.colaborador?.nombre || row.colaboradorNombre,
+    colaboradorNombre: colabName,
     efectivoCierre: Number(row.efectivo_cierre ?? 0),
     datafonoCierre: Number(row.datafono_cierre ?? 0),
     justoCierre: Number(row.justo_cierre ?? 0),
@@ -83,7 +144,7 @@ function fromDbRow(row: any): CierreCaja {
     lider_id: row.lider_id || undefined,
     descuadreLider: row.descuadre_lider !== null && row.descuadre_lider !== undefined ? Number(row.descuadre_lider) : undefined,
     descuadreAuxiliar: row.descuadre_auxiliar !== null && row.descuadre_auxiliar !== undefined ? Number(row.descuadre_auxiliar) : undefined,
-    auditadoPor: row.auditado_por || undefined,
+    auditadoPor: auditorName,
     auditado_por: row.auditado_por || undefined,
     auditadoAt: row.auditado_at || undefined,
     auditado_at: row.auditado_at || undefined,
@@ -96,7 +157,7 @@ function toDbRow(cierre: any, localId: string) {
   const row: any = {
     fecha: cierre.fecha,
     local_id: localId,
-    colaborador_id: cierre.colaboradorId || cierre.colaborador_id || null,
+    colaborador_id: isValidUUID(cierre.colaboradorId || cierre.colaborador_id) ? (cierre.colaboradorId || cierre.colaborador_id) : null,
     efectivo_cierre: cierre.efectivoCierre ?? 0,
     datafono_cierre: cierre.datafonoCierre ?? 0,
     justo_cierre: cierre.justoCierre ?? 0,
@@ -120,11 +181,17 @@ function toDbRow(cierre: any, localId: string) {
   if (cierre.difRappi !== undefined) row.dif_rappi = cierre.difRappi;
   if (cierre.difTransferencias !== undefined) row.dif_transferencias = cierre.difTransferencias;
 
-  if (cierre.liderId || cierre.lider_id) row.lider_id = cierre.liderId || cierre.lider_id;
+  const rawLider = cierre.liderId || cierre.lider_id;
+  if (rawLider) {
+    row.lider_id = isValidUUID(rawLider) ? rawLider : null;
+  }
   if (cierre.descuadreLider !== undefined) row.descuadre_lider = cierre.descuadreLider;
   if (cierre.descuadreAuxiliar !== undefined) row.descuadre_auxiliar = cierre.descuadreAuxiliar;
 
-  if (cierre.auditadoPor || cierre.auditado_por) row.auditado_por = cierre.auditadoPor || cierre.auditado_por;
+  const rawAuditor = cierre.auditadoPor || cierre.auditado_por;
+  if (rawAuditor) {
+    row.auditado_por = isValidUUID(rawAuditor) ? rawAuditor : null;
+  }
   if (cierre.auditadoAt || cierre.auditado_at) row.auditado_at = cierre.auditadoAt || cierre.auditado_at;
 
   if (cierre.justoPedidosPOS !== undefined) row.justo_pedidos_pos = cierre.justoPedidosPOS;
@@ -141,7 +208,7 @@ export const dbAdapter = {
     try {
       const { data, error } = await supabase
         .from("cierres_caja")
-        .select("*")
+        .select("*, colaborador:usuarios!colaborador_id(nombre), auditor:usuarios!auditado_por(nombre)")
         .eq("local_id", localId)
         .neq("estado", "Anulado")
         .order("fecha", { ascending: false });
@@ -173,7 +240,45 @@ export const dbAdapter = {
 
   async saveCierre(cierre: Omit<CierreCaja, "id" | "createdAt">, localNameOrId: string = "Chapinero"): Promise<CierreCaja> {
     const localId = await resolveLocalId(localNameOrId);
-    const dbPayload = toDbRow(cierre, localId);
+
+    // Resolver colaborador_id garantizando un UUID válido para que nunca sea null (evita not-null constraint)
+    let resolvedColabId = isValidUUID(cierre.colaboradorId || cierre.colaborador_id)
+      ? (cierre.colaboradorId || cierre.colaborador_id)
+      : null;
+
+    if (!resolvedColabId) {
+      resolvedColabId = await resolveUserId(cierre.colaboradorNombre || (cierre as any).colaborador_nombre || cierre.liderNombre || cierre.colaboradorId);
+    }
+
+    if (!resolvedColabId) {
+      try {
+        const members = await dbAdapter.getTeamMembers(localNameOrId);
+        const validMember = members.find(m => m.id && isValidUUID(m.id));
+        if (validMember?.id) {
+          resolvedColabId = validMember.id;
+        }
+      } catch (e) {
+        console.warn("No se pudo obtener miembros del equipo para asignar colaborador_id:", e);
+      }
+    }
+
+    let resolvedLiderId = isValidUUID(cierre.liderId || cierre.lider_id)
+      ? (cierre.liderId || cierre.lider_id)
+      : null;
+
+    if (!resolvedLiderId && (cierre.liderNombre || cierre.liderId)) {
+      resolvedLiderId = await resolveUserId(cierre.liderNombre || cierre.liderId);
+    }
+
+    const cierreWithResolvedIds = {
+      ...cierre,
+      colaboradorId: resolvedColabId,
+      colaborador_id: resolvedColabId,
+      liderId: resolvedLiderId,
+      lider_id: resolvedLiderId,
+    };
+
+    const dbPayload = toDbRow(cierreWithResolvedIds, localId);
 
     try {
       const { data, error } = await supabase
@@ -184,6 +289,9 @@ export const dbAdapter = {
 
       if (!error && data) {
         return fromDbRow(data);
+      }
+      if (error) {
+        console.warn("Error Supabase directo insertando cierre:", error.message);
       }
     } catch (e) {
       console.warn("Intento de guardar cierre directo en Supabase falló por RLS, usando API de servidor...", e);
@@ -228,11 +336,25 @@ export const dbAdapter = {
     if (updates.difRappi !== undefined) rowUpdates.dif_rappi = updates.difRappi;
     if (updates.difTransferencias !== undefined) rowUpdates.dif_transferencias = updates.difTransferencias;
 
-    if (updates.liderId !== undefined || updates.lider_id !== undefined) rowUpdates.lider_id = updates.liderId || updates.lider_id;
+    if (updates.colaboradorId !== undefined || updates.colaborador_id !== undefined || (updates as any).colaboradorNombre !== undefined) {
+      const rawColab = updates.colaboradorId || updates.colaborador_id || (updates as any).colaboradorNombre;
+      const resolvedUuid = await resolveUserId(rawColab);
+      if (resolvedUuid) rowUpdates.colaborador_id = resolvedUuid;
+    }
+
+    if (updates.liderId !== undefined || updates.lider_id !== undefined || updates.liderNombre !== undefined) {
+      const rawLider = updates.liderId || updates.lider_id || updates.liderNombre;
+      const resolvedUuid = await resolveUserId(rawLider);
+      if (resolvedUuid) rowUpdates.lider_id = resolvedUuid;
+    }
     if (updates.descuadreLider !== undefined) rowUpdates.descuadre_lider = updates.descuadreLider;
     if (updates.descuadreAuxiliar !== undefined) rowUpdates.descuadre_auxiliar = updates.descuadreAuxiliar;
 
-    if (updates.auditadoPor !== undefined || updates.auditado_por !== undefined) rowUpdates.auditado_por = updates.auditadoPor || updates.auditado_por;
+    if (updates.auditadoPor !== undefined || updates.auditado_por !== undefined) {
+      const rawAuditor = updates.auditadoPor || updates.auditado_por;
+      const resolvedUuid = await resolveUserId(rawAuditor);
+      rowUpdates.auditado_por = resolvedUuid;
+    }
     if (updates.auditadoAt !== undefined || updates.auditado_at !== undefined) rowUpdates.auditado_at = updates.auditadoAt || updates.auditado_at;
 
     if (updates.justoPedidosPOS !== undefined) rowUpdates.justo_pedidos_pos = updates.justoPedidosPOS;
@@ -380,49 +502,45 @@ export const dbAdapter = {
     }
   },
 
-  // ---- Configuración de nómina por colaborador ----
+  // ---- Configuración de nómina por colaborador (Persistido en Supabase) ----
   async getNominaConfig(usuarioId: string) {
-    const { data, error } = await supabase
-      .from("nomina_config")
-      .select("config")
-      .eq("usuario_id", usuarioId)
-      .maybeSingle();
-
-    if (error) {
-      console.error("Error al obtener nómina config de Supabase:", error);
-      throw error;
+    try {
+      const all = await this.getAllNominaConfigs();
+      return all[usuarioId] || {};
+    } catch (e) {
+      return {};
     }
-    return data?.config ?? {};
   },
 
   async getAllNominaConfigs(): Promise<Record<string, any>> {
-    const { data, error } = await supabase
-      .from("nomina_config")
-      .select("usuario_id, config, usuarios(nombre)");
-
-    if (error) {
-      console.error("Error al obtener todas las nómina configs de Supabase:", error);
-      throw error;
+    try {
+      const res = await fetch("/api/db/nomina-config");
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          return json.data;
+        }
+      }
+    } catch (err) {
+      console.warn("Error consultando /api/db/nomina-config, usando caché local:", err);
     }
 
-    const map: Record<string, any> = {};
-    (data || []).forEach((row: any) => {
-      const nombre = row.usuarios?.nombre || row.usuario_id;
-      if (nombre) {
-        map[nombre] = row.config;
-      }
-    });
-    return map;
+    try {
+      const localStored = localStorage.getItem("lopez_gracia_hr_profiles_config_v2");
+      if (localStored) return JSON.parse(localStored);
+    } catch {}
+    return {};
   },
 
   async saveNominaConfig(usuarioId: string, config: any) {
-    const { error } = await supabase
-      .from("nomina_config")
-      .upsert({ usuario_id: usuarioId, config }, { onConflict: "usuario_id" });
-
-    if (error) {
-      console.error("Error al guardar nómina config en Supabase:", error);
-      throw error;
+    try {
+      await fetch("/api/db/nomina-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ usuarioId, config })
+      });
+    } catch (err) {
+      console.warn("Error guardando nómina config vía servidor:", err);
     }
   },
 
@@ -537,34 +655,31 @@ export const dbAdapter = {
     }
   },
 
-  // ---- Configuración SMMLV / Aux. transporte ----
-  async getConfiguracionNomina(localNameOrId: string = "Chapinero") {
-    const localId = await resolveLocalId(localNameOrId);
-    const { data, error } = await supabase
-      .from("configuracion_nomina")
-      .select("*")
-      .eq("local_id", localId)
-      .maybeSingle();
-
-    if (error) {
-      console.error("Error al obtener configuración de nómina de Supabase:", error);
-      throw error;
+  // ---- Configuración SMMLV / Aux. transporte (Persistido en Supabase) ----
+  async getConfiguracionNomina(_localNameOrId: string = "Chapinero") {
+    try {
+      const res = await fetch("/api/db/configuracion-nomina");
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          return json.data;
+        }
+      }
+    } catch (err) {
+      console.warn("Error obteniendo /api/db/configuracion-nomina:", err);
     }
-    return data || { smmlv_base: 1750905, aux_transporte_base: 249095 };
+    return { smmlv_base: 1750905, aux_transporte_base: 249095 };
   },
 
-  async saveConfiguracionNomina(localNameOrId: string = "Chapinero", smmlvBase: number, auxTransporteBase: number) {
-    const localId = await resolveLocalId(localNameOrId);
-    const { error } = await supabase
-      .from("configuracion_nomina")
-      .upsert(
-        { local_id: localId, smmlv_base: smmlvBase, aux_transporte_base: auxTransporteBase },
-        { onConflict: "local_id" }
-      );
-
-    if (error) {
-      console.error("Error al guardar configuración nómina en Supabase:", error);
-      throw error;
+  async saveConfiguracionNomina(_localNameOrId: string = "Chapinero", smmlvBase: number, auxTransporteBase: number) {
+    try {
+      await fetch("/api/db/configuracion-nomina", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ smmlv_base: smmlvBase, aux_transporte_base: auxTransporteBase })
+      });
+    } catch (err) {
+      console.warn("Error guardando configuración nómina vía servidor:", err);
     }
   },
 

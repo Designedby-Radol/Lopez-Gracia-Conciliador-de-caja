@@ -19,9 +19,26 @@ function normalizeSupabaseUrl(rawUrl?: string): string {
 }
 
 const SUPABASE_URL = normalizeSupabaseUrl(process.env.VITE_SUPABASE_URL);
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpjbHR4dXRreHZoYWdibHZuc2N5Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTc3MDcyNiwiZXhwIjoyMTAxMzQ2NzI2fQ.NkAvzfSSMAhzZg3OBhFUgR6PI9l5DfDZUMjfb-XD594";
+const DEFAULT_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpjbHR4dXRreHZoYWdibHZuc2N5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU3NzA3MjYsImV4cCI6MjEwMTM0NjcyNn0.pfqPjpHtRJEvY988Sooaw-pd_LJL0-hxeSSFMjehZRg";
+const SUPABASE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  DEFAULT_ANON_KEY;
 
-const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn(
+    "[WARN] SUPABASE_SERVICE_ROLE_KEY no está definida en el entorno. " +
+    "Usando clave pública/anon como fallback para iniciar el servidor."
+  );
+}
+
+const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+function isValidUUID(id?: string | null): boolean {
+  if (!id || typeof id !== "string") return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
+}
 
 // ---- HELPERS DE SEGURIDAD Y AUDITORÍA EN SUPABASE ----
 async function getSecurityConfigFromSupabase(): Promise<{ passwords: Record<string, string>; statuses: Record<string, "active" | "suspended"> }> {
@@ -483,7 +500,59 @@ async function startServer() {
 
   app.post("/api/db/cierres", async (req, res) => {
     try {
-      const { data, error } = await supabaseAdmin.from("cierres_caja").insert(req.body).select().single();
+      const payload = { ...req.body };
+
+      // Validar y asegurar colaborador_id (evitar not-null constraint error)
+      if (!payload.colaborador_id || !isValidUUID(payload.colaborador_id)) {
+        const identifier = payload.colaboradorNombre || payload.colaborador_nombre || payload.liderNombre || payload.lider_nombre || payload.colaborador_id;
+        let matchedUser = null;
+        const { data: users } = await supabaseAdmin.from("usuarios").select("id, nombre, cedula");
+        
+        if (identifier && users && users.length > 0) {
+          const clean = String(identifier).toLowerCase().replace(/[^a-z0-9]/g, "");
+          matchedUser = users.find((u: any) => {
+            const nom = String(u.nombre || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+            const ced = String(u.cedula || "").trim();
+            return nom.includes(clean) || clean.includes(nom) || (ced && clean.includes(ced));
+          });
+        }
+        
+        if (!matchedUser && users && users.length > 0) {
+          matchedUser = users[0];
+        }
+
+        if (matchedUser?.id) {
+          payload.colaborador_id = matchedUser.id;
+        }
+      }
+
+      // Validar y asegurar local_id
+      if (!payload.local_id || !isValidUUID(payload.local_id)) {
+        const { data: firstLocal } = await supabaseAdmin.from("locales").select("id").limit(1).single();
+        if (firstLocal?.id) {
+          payload.local_id = firstLocal.id;
+        }
+      }
+
+      // Sanitizar campos que no pertenecen a la tabla cierres_caja
+      const validColumns = [
+        "id", "fecha", "local_id", "colaborador_id", "efectivo_cierre", "datafono_cierre",
+        "justo_cierre", "rappi_cierre", "transferencias_cierre", "propinas", "novedades",
+        "estado", "efectivo_pos", "tarjetas_pos", "justo_pos", "rappi_pos", "transferencias_pos",
+        "pos_file_name", "dif_efectivo", "dif_tarjetas", "dif_justo", "dif_rappi",
+        "dif_transferencias", "lider_id", "descuadre_lider", "descuadre_auxiliar",
+        "auditado_por", "auditado_at", "anulado_por", "anulado_at", "justo_pedidos_pos",
+        "justo_sobrante_efectivo_despacho"
+      ];
+
+      const cleanPayload: any = {};
+      for (const col of validColumns) {
+        if (payload[col] !== undefined) {
+          cleanPayload[col] = payload[col];
+        }
+      }
+
+      const { data, error } = await supabaseAdmin.from("cierres_caja").insert(cleanPayload).select().single();
       if (error) throw error;
       res.json({ success: true, data });
     } catch (err: any) {
@@ -495,7 +564,34 @@ async function startServer() {
   app.put("/api/db/cierres/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const { data, error } = await supabaseAdmin.from("cierres_caja").update(req.body).eq("id", id).select().single();
+      const validColumns = [
+        "fecha", "local_id", "colaborador_id", "efectivo_cierre", "datafono_cierre",
+        "justo_cierre", "rappi_cierre", "transferencias_cierre", "propinas", "novedades",
+        "estado", "efectivo_pos", "tarjetas_pos", "justo_pos", "rappi_pos", "transferencias_pos",
+        "pos_file_name", "dif_efectivo", "dif_tarjetas", "dif_justo", "dif_rappi",
+        "dif_transferencias", "lider_id", "descuadre_lider", "descuadre_auxiliar",
+        "auditado_por", "auditado_at", "anulado_por", "anulado_at", "justo_pedidos_pos",
+        "justo_sobrante_efectivo_despacho"
+      ];
+
+      const cleanPayload: any = {};
+      for (const col of validColumns) {
+        if (req.body[col] !== undefined) {
+          cleanPayload[col] = req.body[col];
+        }
+      }
+
+      if (cleanPayload.colaborador_id && !isValidUUID(cleanPayload.colaborador_id)) {
+        delete cleanPayload.colaborador_id;
+      }
+      if (cleanPayload.lider_id && !isValidUUID(cleanPayload.lider_id)) {
+        delete cleanPayload.lider_id;
+      }
+      if (cleanPayload.auditado_por && !isValidUUID(cleanPayload.auditado_por)) {
+        delete cleanPayload.auditado_por;
+      }
+
+      const { data, error } = await supabaseAdmin.from("cierres_caja").update(cleanPayload).eq("id", id).select().single();
       if (error) throw error;
       res.json({ success: true, data });
     } catch (err: any) {
@@ -645,229 +741,241 @@ Novedades de la quincena:
     }
   });
 
-  // ---- INTEGRACIÓN POS: JUSTO (4.1) ----
-  app.get("/api/pos/justo", async (req, res) => {
+  // ---- INTEGRACIÓN CANALES: JUSTO V3 (/ecommerce/orders) ----
+  // Corte horario oficial: 4:00am a 4:00am Bogotá (09:00 UTC a 09:00 UTC día siguiente)
+  app.get("/api/canales/justo/ventas", async (req, res) => {
     try {
+      const localId = (req.query.localId || req.query.local_id) as string;
+      const fecha = (req.query.fecha as string) || new Date().toISOString().split("T")[0];
+
+      if (!localId || !fecha) {
+        return res.status(400).json({ success: false, error: "localId y fecha son requeridos" });
+      }
+
+      const { data: local, error: localError } = await supabaseAdmin
+        .from("locales")
+        .select("justo_store_id")
+        .eq("id", localId)
+        .single();
+
+      if (localError || !local?.justo_store_id) {
+        return res.json({ configurado: false });
+      }
+
+      const storeId = local.justo_store_id;
       const justoToken = process.env.JUSTO_API_TOKEN;
       if (!justoToken) {
-        return res.status(503).json({
-          status: "error",
-          message: "Integración con Justo no configurada. Falta JUSTO_API_TOKEN en las variables de entorno."
-        });
+        return res.json({ configurado: false });
       }
 
-      const fecha = (req.query.fecha as string) || new Date().toISOString().split("T")[0];
-      const storeId = (req.query.store_id as string) || (req.query.local_id as string) || process.env.JUSTO_STORE_ID || "default";
+      // Regla de corte 4:00am a 4:00am hora Bogotá = 09:00:00Z a 09:00:00Z (UTC-5 sin DST)
+      const dia = new Date(`${fecha}T00:00:00.000Z`);
+      const diaSiguiente = new Date(dia);
+      diaSiguiente.setUTCDate(dia.getUTCDate() + 1);
 
-      try {
-        const response = await fetch(`https://api.getjusto.com/v1/orders?date=${fecha}&store_id=${storeId}`, {
+      const fromDate = `${dia.toISOString().slice(0, 10)}T09:00:00.000Z`;
+      const toDate = `${diaSiguiente.toISOString().slice(0, 10)}T09:00:00.000Z`;
+
+      let totalVentas = 0;
+      let cantidadOrdenes = 0;
+      let sobranteEfectivoDespacho = 0;
+      let page = 1;
+      let hasMore = true;
+
+      while (hasMore && page <= 25) {
+        const url = new URL("https://api.service.getjusto.com/v3/ecommerce/orders");
+        url.searchParams.set("storeId", storeId);
+        url.searchParams.set("fromDate", fromDate);
+        url.searchParams.set("toDate", toDate);
+        url.searchParams.set("page", String(page));
+        url.searchParams.set("limit", "50");
+
+        const response = await fetch(url.toString(), {
           headers: {
             Authorization: `Bearer ${justoToken}`,
-            "Content-Type": "application/json"
-          }
+            "Content-Type": "application/json",
+          },
         });
 
         if (!response.ok) {
-          const errText = await response.text();
-          console.warn(`[Justo API] Respuesta no exitosa (${response.status}):`, errText);
-          return res.status(response.status).json({
-            status: "error",
-            message: `Justo API error (${response.status}): ${errText}`
-          });
+          if (page === 1) {
+            const errText = await response.text();
+            console.warn(`[Justo API] Error (${response.status}):`, errText);
+            return res.status(response.status).json({ success: false, error: errText });
+          }
+          break;
         }
 
         const data = await response.json();
-        const orders: any[] = Array.isArray(data.orders) ? data.orders : (Array.isArray(data) ? data : []);
+        const orders: any[] = Array.isArray(data.orders)
+          ? data.orders
+          : (Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : []));
 
-        let totalPedidosPos = 0;
-        let sobranteEfectivoDespacho = 0;
+        if (orders.length === 0) {
+          hasMore = false;
+          break;
+        }
 
         for (const order of orders) {
-          totalPedidosPos += Number(order.total || order.amount || 0);
-          if (order.payment_method === "cash" || order.metodo_pago === "efectivo") {
-            sobranteEfectivoDespacho += Number(order.cash_surplus || order.delivery_cash || 0);
+          cantidadOrdenes += 1;
+          const orderTotal = Number(
+            order.itemsPriceBeforeDiscountsAfterProductDiscount ??
+            order.totalVentas ??
+            order.total ??
+            0
+          );
+          totalVentas += orderTotal;
+
+          const isCash = order.paymentType === "cash" || order.payment_method === "cash" || order.metodo_pago === "efectivo";
+          if (isCash) {
+            sobranteEfectivoDespacho += Number(order.deliveryFee ?? order.delivery_cash ?? order.sobranteEfectivoDespacho ?? 0);
           }
         }
 
-        return res.json({
-          status: "ok",
-          data: {
-            total_pedidos_pos: totalPedidosPos,
-            sobrante_efectivo_despacho: sobranteEfectivoDespacho,
-            raw_count: orders.length
-          }
-        });
-      } catch (fetchError: any) {
-        console.error("Error al consultar API de Justo:", fetchError);
-        return res.status(502).json({
-          status: "error",
-          message: `Fallo al comunicarse con Justo: ${fetchError?.message || "Error de red"}`
-        });
-      }
-    } catch (error: any) {
-      console.error("Error en /api/pos/justo:", error);
-      return res.status(500).json({
-        status: "error",
-        message: error?.message || "Error interno al procesar pedidos de Justo."
-      });
-    }
-  });
-
-  // ---- INTEGRACIÓN POS: INTUIPOS (4.2) ----
-  app.get("/api/pos/intuipos", async (req, res) => {
-    try {
-      const apiKey = process.env.INTUIPOS_API_KEY;
-      const storeId = process.env.INTUIPOS_STORE_ID;
-
-      if (!apiKey || !storeId) {
-        return res.status(503).json({
-          status: "error",
-          message: "Integración con IntuiPOS no configurada. Falta INTUIPOS_API_KEY o INTUIPOS_STORE_ID en las variables de entorno."
-        });
-      }
-
-      const fecha = (req.query.fecha as string) || new Date().toISOString().split("T")[0];
-
-      try {
-        const response = await fetch(`https://api.intuipos.com/v1/sales/summary?store_id=${storeId}&date=${fecha}`, {
-          headers: {
-            "x-api-key": apiKey,
-            "Content-Type": "application/json"
-          }
-        });
-
-        if (!response.ok) {
-          const errText = await response.text();
-          console.warn(`[IntuiPOS API] Respuesta no exitosa (${response.status}):`, errText);
-          return res.status(response.status).json({
-            status: "error",
-            message: `IntuiPOS API error (${response.status}): ${errText}`
-          });
+        if (data.totalCount && cantidadOrdenes >= data.totalCount) {
+          hasMore = false;
+        } else if (data.pagination && page >= (data.pagination.totalPages || data.pagination.pages || 1)) {
+          hasMore = false;
+        } else if (orders.length < 50) {
+          hasMore = false;
+        } else {
+          page++;
         }
-
-        const data = await response.json();
-
-        return res.json({
-          status: "ok",
-          data: {
-            efectivo: Number(data.efectivo || data.cash || 0),
-            datafono: Number(data.datafono || data.tarjetas || data.card || 0),
-            justo: Number(data.justo || 0),
-            rappi: Number(data.rappi || 0),
-            transferencias: Number(data.transferencias || data.transfers || 0)
-          }
-        });
-      } catch (fetchError: any) {
-        console.error("Error al consultar API de IntuiPOS:", fetchError);
-        return res.status(502).json({
-          status: "error",
-          message: `Fallo al comunicarse con IntuiPOS: ${fetchError?.message || "Error de red"}`
-        });
-      }
-    } catch (error: any) {
-      console.error("Error en /api/pos/intuipos:", error);
-      return res.status(500).json({
-        status: "error",
-        message: error?.message || "Error interno al procesar ventas de IntuiPOS."
-      });
-    }
-  });
-
-  // ---- SINCRONIZACIÓN COMBINADA DE CIERRE (4.3) ----
-  app.post("/api/pos/sync-closure", async (req, res) => {
-    try {
-      const { cierre_id, fecha, local_id } = req.body;
-
-      if (!fecha) {
-        return res.status(400).json({
-          status: "error",
-          message: "Parámetro 'fecha' requerido (formato YYYY-MM-DD)."
-        });
-      }
-
-      const syncResult: any = {
-        cierre_id,
-        fecha,
-        local_id,
-        justo: null,
-        intuipos: null,
-        errors: []
-      };
-
-      // 1. Intentar sincronizar Justo si está configurado
-      if (process.env.JUSTO_API_TOKEN) {
-        try {
-          const storeId = process.env.JUSTO_STORE_ID || local_id || "default";
-          const justoRes = await fetch(`https://api.getjusto.com/v1/orders?date=${fecha}&store_id=${storeId}`, {
-            headers: {
-              Authorization: `Bearer ${process.env.JUSTO_API_TOKEN}`,
-              "Content-Type": "application/json"
-            }
-          });
-          if (justoRes.ok) {
-            const data = await justoRes.json();
-            const orders = Array.isArray(data.orders) ? data.orders : (Array.isArray(data) ? data : []);
-            let total = 0;
-            let surplus = 0;
-            orders.forEach((o: any) => {
-              total += Number(o.total || o.amount || 0);
-              if (o.payment_method === "cash" || o.metodo_pago === "efectivo") {
-                surplus += Number(o.cash_surplus || o.delivery_cash || 0);
-              }
-            });
-            syncResult.justo = {
-              total_pedidos_pos: total,
-              sobrante_efectivo_despacho: surplus,
-              raw_count: orders.length
-            };
-          } else {
-            syncResult.errors.push(`Justo status ${justoRes.status}`);
-          }
-        } catch (e: any) {
-          syncResult.errors.push(`Justo error: ${e.message}`);
-        }
-      } else {
-        syncResult.justo = { not_configured: true };
-      }
-
-      // 2. Intentar sincronizar IntuiPOS si está configurado
-      if (process.env.INTUIPOS_API_KEY && process.env.INTUIPOS_STORE_ID) {
-        try {
-          const intuiRes = await fetch(`https://api.intuipos.com/v1/sales/summary?store_id=${process.env.INTUIPOS_STORE_ID}&date=${fecha}`, {
-            headers: {
-              "x-api-key": process.env.INTUIPOS_API_KEY,
-              "Content-Type": "application/json"
-            }
-          });
-          if (intuiRes.ok) {
-            const data = await intuiRes.json();
-            syncResult.intuipos = {
-              efectivo: Number(data.efectivo || data.cash || 0),
-              datafono: Number(data.datafono || data.tarjetas || data.card || 0),
-              justo: Number(data.justo || 0),
-              rappi: Number(data.rappi || 0),
-              transferencias: Number(data.transferencias || data.transfers || 0)
-            };
-          } else {
-            syncResult.errors.push(`IntuiPOS status ${intuiRes.status}`);
-          }
-        } catch (e: any) {
-          syncResult.errors.push(`IntuiPOS error: ${e.message}`);
-        }
-      } else {
-        syncResult.intuipos = { not_configured: true };
       }
 
       return res.json({
-        status: "ok",
-        data: syncResult
+        configurado: true,
+        totalVentas,
+        cantidadOrdenes,
+        sobranteEfectivoDespacho,
       });
     } catch (error: any) {
-      console.error("Error en /api/pos/sync-closure:", error);
-      return res.status(500).json({
-        status: "error",
-        message: error?.message || "Error al sincronizar cierre de caja con POS."
+      console.error("Error en /api/canales/justo/ventas:", error);
+      return res.status(500).json({ success: false, error: error?.message || "Error interno de Justo" });
+    }
+  });
+
+  // ---- INTEGRACIÓN CANALES: INTUIPOS (GetTransactionsByPayment) ----
+  // GET /api/canales/intuipos/ventas?localId=<uuid>&fecha=YYYY-MM-DD
+  app.get("/api/canales/intuipos/ventas", async (req, res) => {
+    try {
+      const localId = (req.query.localId || req.query.local_id) as string;
+      const fecha = req.query.fecha as string;
+      if (!localId || !fecha) {
+        return res.status(400).json({ success: false, error: "localId y fecha son requeridos" });
+      }
+
+      const { data: local } = await supabaseAdmin
+        .from("locales")
+        .select("intuipos_store_id")
+        .eq("id", localId)
+        .single();
+
+      const storeId = local?.intuipos_store_id || process.env.INTUIPOS_STORE_ID || "21401";
+      const apiKey = process.env.INTUIPOS_TOKEN || process.env.INTUIPOS_API_KEY;
+      if (!apiKey) {
+        return res.json({ configurado: false, razon: "Falta INTUIPOS_TOKEN en variables de entorno" });
+      }
+
+      const dtFechaInicial = `${fecha}T04:00:00`;
+      const diaSiguiente = new Date(`${fecha}T00:00:00.000Z`);
+      diaSiguiente.setUTCDate(diaSiguiente.getUTCDate() + 1);
+      const dtFechaFinal = `${diaSiguiente.toISOString().slice(0, 10)}T04:00:00`;
+
+      const url = new URL(`https://webapi.intuipos.net/api/v1/Reports/GetTransactionsByPayment`);
+      url.searchParams.set("iPuntoDeVentaID", String(storeId));
+      url.searchParams.set("dtFechaInicial", dtFechaInicial);
+      url.searchParams.set("dtFechaFinal", dtFechaFinal);
+
+      const resp = await fetch(url.toString(), {
+        headers: {
+          ApiKey: apiKey,
+          StoreId: String(storeId),
+        },
       });
+
+      if (!resp.ok) {
+        console.warn(`IntuiPOS API respondió con estado ${resp.status}`);
+        return res.status(resp.status).json({ success: false, error: `IntuiPOS error HTTP ${resp.status}` });
+      }
+
+      const items: any[] = await resp.json();
+
+      if (!Array.isArray(items)) {
+        return res.status(502).json({ success: false, error: "Respuesta inesperada de IntuiPOS" });
+      }
+
+      let efectivoPOS = 0;
+      let justoPOS = 0;          // CUENTAS x COBRAR con DocumentType "CxC JUSTO"
+      let rappiPOS = 0;          // CUENTAS x COBRAR con DocumentType "CxC RAPPI"
+      let tcreditoCredit = 0;
+      let tdebitoCredit = 0;
+      let tcreditoDebit = 0;
+      let tdebitoDebit = 0;
+      let otherTransferCredit = 0;
+      let otherTransferDebit = 0;
+
+      for (const row of items) {
+        // Excluir movimientos administrativos de caja (apertura de base y cierre de caja)
+        const trxType = (row.TransactionType || "").toString().trim().toUpperCase();
+        if (trxType === "BASE-INICIO CAJA" || trxType === "CIERRE DE CAJA") continue;
+
+        // Solo procesar registros activos
+        if (row.PaymentDetailStatus !== "Activo") continue;
+
+        const credit = Number(row.dCredit) || 0;
+        const debit = Number(row.dDebit) || 0;
+        const tipo = Number(row.tiPaymentTypeID);
+        const paymentTypeStr = (row.PaymentType || "").toString().trim().toUpperCase();
+        const docTypeStr = (row.DocumentType || "").toString().trim().toUpperCase();
+
+        // 1. EFECTIVO CAJA
+        if (paymentTypeStr === "EFECTIVO CAJA" || tipo === 1) {
+          efectivoPOS += (credit - debit);
+        }
+        // 2. CUENTAS x COBRAR -> CxC JUSTO
+        else if (docTypeStr === "CXC JUSTO" || (paymentTypeStr.includes("CUENTAS") && docTypeStr.includes("JUSTO"))) {
+          justoPOS += (credit - debit);
+        }
+        // 3. CUENTAS x COBRAR -> CxC RAPPI
+        else if (docTypeStr === "CXC RAPPI" || (paymentTypeStr.includes("CUENTAS") && docTypeStr.includes("RAPPI"))) {
+          rappiPOS += (credit - debit);
+        }
+        // 4. TRANSFERENCIAS POS: (TCREDITO + TDEBITO) - (dDebit facturas debitadas)
+        else if (paymentTypeStr === "TCREDITO" || tipo === 2) {
+          tcreditoCredit += credit;
+          tcreditoDebit += debit;
+        } else if (paymentTypeStr === "TDEBITO" || tipo === 3) {
+          tdebitoCredit += credit;
+          tdebitoDebit += debit;
+        } else if (paymentTypeStr === "TRANSFERENCIA" || paymentTypeStr === "NEQUI" || paymentTypeStr === "PSE" || tipo === 13 || tipo === 83) {
+          otherTransferCredit += credit;
+          otherTransferDebit += debit;
+        }
+      }
+
+      // Transferencias POS = (TCREDITO + TDEBITO) - (dDebit de facturas debitadas)
+      const transferenciasPOS = Math.round(
+        (tcreditoCredit + tdebitoCredit + otherTransferCredit) - (tcreditoDebit + tdebitoDebit + otherTransferDebit)
+      );
+
+      // Tarjetas / datáfonos: según especificación, no se toma directamente como resultado
+      // de conciliación automática sino mediante confirmación manual (vouchers / datáfono físico).
+      const tarjetasPOS = 0;
+
+      return res.json({
+        configurado: true,
+        efectivoPOS: Math.round(efectivoPOS),
+        tarjetasPOS,
+        justoPOS: Math.round(justoPOS),
+        rappiPOS: Math.round(rappiPOS),
+        transferenciasPOS,
+        totalTcredito: Math.round(tcreditoCredit - tcreditoDebit),
+        totalTdebito: Math.round(tdebitoCredit - tdebitoDebit),
+      });
+    } catch (error: any) {
+      console.error("Error en /api/canales/intuipos/ventas:", error);
+      return res.status(500).json({ success: false, error: error?.message || "Error interno" });
     }
   });
 

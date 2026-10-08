@@ -532,9 +532,19 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
     };
 
     try {
+      // Buscar colaborador en la lista del equipo cargada para proveer colaborador_id
+      const cleanNom = colaboradorNombre.trim().toLowerCase();
+      const matchedMember = teamMemberList.find((m: any) => {
+        const nom = (m.nombre || "").toLowerCase();
+        const em = (m.email || "").toLowerCase();
+        return nom === cleanNom || (cleanNom.length >= 3 && (nom.includes(cleanNom) || cleanNom.includes(nom) || em.includes(cleanNom)));
+      });
+
       const payload = {
         fecha,
         colaboradorNombre: colaboradorNombre.trim(),
+        colaboradorId: matchedMember?.id,
+        colaborador_id: matchedMember?.id,
         efectivoCierre: cleanNum(efectivo),
         datafonoCierre: cleanNum(datafono),
         justoCierre: cleanNum(justo),

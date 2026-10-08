@@ -785,8 +785,8 @@ export default function OperationalChecklist({
 
       {/* MODAL DE ATENCIÓN DE ALARMA OPERATIVA 1:30 PM */}
       {isAlarmActive && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 md:p-8 space-y-6 relative animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 md:left-64 z-50 flex items-center justify-center p-4 sm:p-6 md:p-8 bg-slate-900/65 backdrop-blur-xs animate-in fade-in duration-200 overflow-y-auto">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 md:p-8 space-y-6 relative animate-in zoom-in-95 duration-200 my-auto">
             {/* Indicador de Tipo y Control de Sonido */}
             <div className="flex items-center justify-between">
               <span className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-black tracking-wide border ${
