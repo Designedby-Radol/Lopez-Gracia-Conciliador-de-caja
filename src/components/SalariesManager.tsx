@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
+import { divisorHorasMes, fechasDelPeriodo } from "../lib/payroll";
+import { parseIsoDateLocal } from "../lib/dates";
 import { 
   DollarSign, 
   Sparkles, 
@@ -585,7 +587,8 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
   // CÁLCULO MATEMÁTICO EN VIVO DE LA QUINCENA
   const calculateQuincena = (config: EmployeeSalaryConfig, novs: QuincenaNovedades) => {
     const salarioMensual = config.salarioBaseMensual || smmlvBase;
-    const valorHoraOrdinaria = salarioMensual / 230; // Hora ordinaria base CST (230 horas/mes)
+    // Hora ordinaria: divisor según la jornada legal vigente al cierre del período (Ley 2101: 42 h → 210)
+    const valorHoraOrdinaria = salarioMensual / divisorHorasMes(fechaFin);
     const auxDiarioTransporte = auxTransporteBase / 30; // Aux. transporte mensual / 30 días
 
     let salarioQuincenal = 0;
@@ -769,11 +772,10 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
         const schedule = config.horarioSemanal || getDefaultSchedule(config.diaDescansoContractual);
 
-        for (let d = 1; d <= 15; d++) {
-          const diaStr = d < 10 ? `0${d}` : `${d}`;
-          const fechaStr = `2026-07-${diaStr}`;
-          const dateObj = new Date(2026, 6, d);
-          
+        // Recorre el período seleccionado (antes estaba fijo en 1–15 de julio de 2026).
+        for (const fechaStr of fechasDelPeriodo(fechaInicio, fechaFin)) {
+          const dateObj = parseIsoDateLocal(fechaStr);
+
           const dayNames: ("Domingo" | "Lunes" | "Martes" | "Miércoles" | "Jueves" | "Viernes" | "Sábado")[] = [
             "Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"
           ];
@@ -893,7 +895,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
         let deduccionTiempoFaltante = 0;
 
         const salarioMensual = config.salarioBaseMensual || smmlvBase;
-        const valorHoraOrdinaria = salarioMensual / 230;
+        const valorHoraOrdinaria = salarioMensual / divisorHorasMes(fechaFin);
 
         if (minutosNetos > 0) {
           horasExtraDiurnasNetas = Math.round((minutosNetos / 60) * 10) / 10;
@@ -943,15 +945,13 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
   // Manejar respuesta del usuario a Alertas de Confirmación (Fase 1)
   const handleConfirmAlertChoice = (alertObj: any, decision: "INJUSTIFICADA" | "PERMISO") => {
     const { colaborador, fecha } = alertObj;
-    const config = getEmployeeConfig({ nombre: colaborador });
-    const salarioMensual = config.salarioBaseMensual || smmlvBase;
-    const descuentoDiaBase = Math.round(salarioMensual / 30);
 
     setQuincenaNovedades(prev => {
       const current = getNovedades(colaborador);
-      const updatedDeducciones = decision === "INJUSTIFICADA"
-        ? (current.deduccionesAdicionales || 0) + descuentoDiaBase
-        : current.deduccionesAdicionales;
+      // El día no pagado se refleja reduciendo diasLaboradosQuincena (salario proporcional).
+      // Antes además se sumaba salario/30 a deducciones: se descontaba dos veces.
+      // El auxilio de transporte ya excluye el día porque solo cuenta días con marcación.
+      const updatedDeducciones = current.deduccionesAdicionales;
 
       const updatedDiasLaborados = decision === "INJUSTIFICADA"
         ? Math.max(1, (current.diasLaboradosQuincena || 15) - 1)
@@ -1135,7 +1135,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
   };
 
   // GUARDAR LIQUIDACIÓN EN EL HISTORIAL
-  const handleSaveQuincenaToHistory = () => {
+  const handleSaveQuincenaToHistory = async () => {
     const newRecords: SavedSettlementRecord[] = teamMembers.map(m => {
       const config = getEmployeeConfig(m);
       const novs = getNovedades(m.nombre);
@@ -1163,11 +1163,16 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
     const updatedHistory = [...newRecords, ...savedHistory];
     setSavedHistory(updatedHistory);
 
-    // Guardar en Supabase turnos_nomina
+    // Guardar en Supabase turnos_nomina (esperando cada resultado para informar fallas reales)
+    const fallidos: string[] = [];
     for (const rec of newRecords) {
       const member = teamMembers.find(m => m.nombre === rec.empleadoNombre);
-      if (member?.id) {
-        dbAdapter.saveTurnoNomina({
+      if (!member?.id) {
+        fallidos.push(`${rec.empleadoNombre} (sin ID de usuario)`);
+        continue;
+      }
+      try {
+        await dbAdapter.saveTurnoNomina({
           usuarioId: member.id,
           localNameOrId: "Chapinero",
           fechaInicio: rec.periodoInicio,
@@ -1183,22 +1188,29 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
             netoAPagar: rec.netoAPagar,
             ...rec.desglose
           }
-        }).catch(e => console.error("Error al guardar turno de nómina en Supabase:", e));
+        });
+      } catch (e: any) {
+        console.error("Error al guardar turno de nómina:", e);
+        fallidos.push(`${rec.empleadoNombre} (${e?.message || "error"})`);
       }
     }
 
-    alert(`💾 ¡Liquidación de la quincena "${quincenaNombre}" guardada exitosamente en Supabase! Total colaboradores procesados: ${teamMembers.length}.`);
+    if (fallidos.length > 0) {
+      alert(`⚠️ La liquidación "${quincenaNombre}" NO se guardó para ${fallidos.length} colaborador(es):\n- ${fallidos.join("\n- ")}`);
+    } else {
+      alert(`💾 Liquidación de la quincena "${quincenaNombre}" guardada para ${newRecords.length} colaboradores.`);
+    }
   };
 
   // ELIMINAR REGISTRO DE HISTORIAL
   const handleDeleteHistoryRecord = async (id: string) => {
     if (confirm("¿Estás seguro de eliminar este registro del historial de pagos?")) {
-      const updated = savedHistory.filter(r => r.id !== id);
-      setSavedHistory(updated);
       try {
         await dbAdapter.deleteTurnoNomina(id);
-      } catch (e) {
-        console.error("Error al eliminar turno nómina en Supabase:", e);
+        setSavedHistory(prev => prev.filter(r => r.id !== id));
+      } catch (e: any) {
+        console.error("Error al eliminar turno nómina:", e);
+        alert(`No se pudo eliminar el registro: ${e?.message || "error desconocido"}`);
       }
     }
   };
@@ -1411,8 +1423,8 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
             </div>
             <div className="bg-white p-3 rounded-xl border border-emerald-200 space-y-1">
               <span className="font-bold block text-[10px] text-emerald-700 uppercase">Jornada Semanal</span>
-              <span className="font-black text-sm block pt-1">42 Horas Semanales</span>
-              <span className="text-[10px] text-emerald-700 font-bold block">(Divisor 210 hrs/mes)</span>
+              <span className="font-black text-sm block pt-1">{divisorHorasMes(fechaFin) / 5} Horas Semanales</span>
+              <span className="text-[10px] text-emerald-700 font-bold block">(Divisor {divisorHorasMes(fechaFin)} hrs/mes)</span>
             </div>
           </div>
         </div>

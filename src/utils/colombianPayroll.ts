@@ -1,4 +1,6 @@
 import * as XLSX from "xlsx";
+import { getColombianHolidays } from "./colombiaHolidays";
+import { minutosNocturnos, duracionTurnoMin } from "../lib/payroll";
 // Utilitarios y Lógica de Nómina Colombiana con Reglas POS, Festivos y Recargos 2026
 
 // Calendario de Días Festivos Oficiales Colombia 2026 (Ley Emiliani)
@@ -69,9 +71,12 @@ export const checkColombianHolidayOrSunday = (dateStr: string): { isHolidayOrSun
     }
   }
 
-  // Verificar en mapa de festivos
+  // Verificar festivos (nombre si está en la tabla 2026; cálculo general para cualquier año)
   if (COLOMBIAN_HOLIDAYS_2026[normalizedDate]) {
     return { isHolidayOrSunday: true, reason: `Festivo Nacional: ${COLOMBIAN_HOLIDAYS_2026[normalizedDate]}` };
+  }
+  if (y && getColombianHolidays(y).has(normalizedDate)) {
+    return { isHolidayOrSunday: true, reason: "Festivo Nacional" };
   }
 
   // Verificar si es Domingo
@@ -625,7 +630,7 @@ export interface ProcessedDayRecord {
   salidaTempranaMinutos: number; // Salida antes del cierre programado
   tiempoAdicionalSalidaMinutos: number; // Salida después del cierre programado
   horasTrabajadasEfectivas: number;
-  recargoNocturnoMinutos: number; // Minutos trabajados entre 21:00 (9pm) y 06:00 (6am)
+  recargoNocturnoMinutos: number; // Minutos trabajados entre 19:00 (7pm) y 06:00 (6am)
   observacion: string;
 }
 
@@ -679,16 +684,12 @@ export const evaluateAttendanceDay = (
     tiempoAdicionalSalidaMinutos = actualExitMins - schedExitMins;
   }
 
-  // Duración trabajada efectiva
-  const rawWorkMins = Math.max(0, actualExitMins - effectiveWorkStartMins - (lunchMinutes || 0));
+  // Duración trabajada efectiva (soporta turnos que cruzan medianoche)
+  const rawWorkMins = Math.max(0, duracionTurnoMin(effectiveWorkStartMins, actualExitMins) - (lunchMinutes || 0));
   const horasTrabajadasEfectivas = Math.round((rawWorkMins / 60) * 10) / 10;
 
-  // Recargo nocturno (franja de 9:00 PM / 21:00 a 6:00 AM)
-  let recargoNocturnoMinutos = 0;
-  const nightStartMins = 21 * 60; // 9:00 PM = 1260 mins
-  if (actualExitMins > nightStartMins) {
-    recargoNocturnoMinutos = Math.max(0, actualExitMins - nightStartMins);
-  }
+  // Recargo nocturno: minutos trabajados dentro de la franja 7:00 p. m. – 6:00 a. m.
+  const recargoNocturnoMinutos = minutosNocturnos(effectiveWorkStartMins, actualExitMins);
 
   // Generar observación
   let obs = "";
