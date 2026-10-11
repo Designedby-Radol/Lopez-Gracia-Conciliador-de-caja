@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { divisorHorasMes, horasSemanalesLegales, minutosNocturnos, duracionTurnoMin, fechasDelPeriodo } from "./payroll";
+import {
+  divisorHorasMes, horasSemanalesLegales, minutosNocturnos, duracionTurnoMin, fechasDelPeriodo,
+  factorDominical, etiquetaRecargoDominical, salidaContinuaMin, minutosNocturnosIntervalo,
+  clasificarTiempoDia, totalizarTiempoPeriodo,
+} from "./payroll";
 import { getColombianHolidays } from "../utils/colombiaHolidays";
 
 const hm = (h: number, m = 0) => h * 60 + m;
@@ -60,5 +64,81 @@ describe("festivos de Colombia (Ley Emiliani)", () => {
     for (const f of ["2027-03-25", "2027-03-26", "2027-05-10", "2027-05-31", "2027-06-07"]) {
       expect(h.has(f)).toBe(true);
     }
+  });
+});
+
+describe("factorDominical (Ley 2466 de 2025)", () => {
+  it.each([
+    ["2025-06-30", 0.75],
+    ["2025-07-01", 0.8],
+    ["2026-06-30", 0.8],
+    ["2026-07-01", 0.9],
+    ["2027-06-30", 0.9],
+    ["2027-07-01", 1.0],
+  ])("%s → %d", (fecha, factor) => {
+    expect(factorDominical(fecha)).toBe(factor);
+  });
+  it("etiqueta legible", () => {
+    expect(etiquetaRecargoDominical("2026-06-16")).toBe("+80%");
+    expect(etiquetaRecargoDominical("2027-07-15")).toBe("+100%");
+  });
+});
+
+describe("línea de tiempo continua", () => {
+  it("salida después de medianoche suma 1440", () => {
+    expect(salidaContinuaMin(hm(18), hm(1))).toBe(1440 + hm(1));
+    expect(salidaContinuaMin(hm(7), hm(15))).toBe(hm(15));
+  });
+  it("nocturnos de un intervalo que empieza pasada la medianoche", () => {
+    expect(minutosNocturnosIntervalo(1440 + hm(5), 1440 + hm(7))).toBe(60);
+    expect(minutosNocturnosIntervalo(hm(20), hm(20))).toBe(0);
+  });
+});
+
+describe("clasificarTiempoDia", () => {
+  it("12:00–19:30, sale 20:00: 30 min extra nocturna y 30 min de recargo ordinario", () => {
+    const t = clasificarTiempoDia({ inicioEfectivoMin: hm(12), salidaProgramadaMin: hm(19, 30), salidaRealMin: hm(20), faltantesMin: 0 });
+    expect(t).toEqual({ extraDiurnaMin: 0, extraNocturnaMin: 30, faltantesMin: 0, recargoNocturnoMin: 30 });
+  });
+  it("07:00–15:00, sale 20:00: 4 h extra diurna y 1 h extra nocturna", () => {
+    const t = clasificarTiempoDia({ inicioEfectivoMin: hm(7), salidaProgramadaMin: hm(15), salidaRealMin: hm(20), faltantesMin: 0 });
+    expect(t.extraDiurnaMin).toBe(240);
+    expect(t.extraNocturnaMin).toBe(60);
+    expect(t.recargoNocturnoMin).toBe(0);
+  });
+  it("tardanza de 20 min repuesta el mismo día: solo el excedente es extra", () => {
+    const t = clasificarTiempoDia({ inicioEfectivoMin: hm(7, 20), salidaProgramadaMin: hm(15), salidaRealMin: hm(15, 30), faltantesMin: 20 });
+    expect(t).toEqual({ extraDiurnaMin: 10, extraNocturnaMin: 0, faltantesMin: 0, recargoNocturnoMin: 0 });
+  });
+  it("los minutos que reponen tardanza se toman primero y son jornada ordinaria", () => {
+    // Entra 12:30 (30 tarde), sale 20:00: 19:30–20:00 repone la tardanza → sin extra, 60 min de recargo ordinario
+    const t = clasificarTiempoDia({ inicioEfectivoMin: hm(12, 30), salidaProgramadaMin: hm(19, 30), salidaRealMin: hm(20), faltantesMin: 30 });
+    expect(t).toEqual({ extraDiurnaMin: 0, extraNocturnaMin: 0, faltantesMin: 0, recargoNocturnoMin: 60 });
+  });
+  it("salida anticipada sin reposición queda como faltante", () => {
+    const t = clasificarTiempoDia({ inicioEfectivoMin: hm(7), salidaProgramadaMin: hm(15), salidaRealMin: hm(14), faltantesMin: 60 });
+    expect(t.faltantesMin).toBe(60);
+    expect(t.extraDiurnaMin + t.extraNocturnaMin).toBe(0);
+  });
+  it("turno que cruza medianoche 18:00–02:00 con salida 03:00", () => {
+    const t = clasificarTiempoDia({ inicioEfectivoMin: hm(18), salidaProgramadaMin: 1440 + hm(2), salidaRealMin: 1440 + hm(3), faltantesMin: 0 });
+    expect(t.extraNocturnaMin).toBe(60);
+    expect(t.recargoNocturnoMin).toBe(7 * 60);
+  });
+});
+
+describe("totalizarTiempoPeriodo", () => {
+  it("no netea tardanzas de un día contra extras de otro", () => {
+    const r = totalizarTiempoPeriodo(
+      [
+        { extraDiurnaMin: 60, extraNocturnaMin: 0, faltantesMin: 0 },
+        { extraDiurnaMin: 0, extraNocturnaMin: 30, faltantesMin: 0 },
+        { extraDiurnaMin: 0, extraNocturnaMin: 0, faltantesMin: 45 },
+      ],
+      10000
+    );
+    expect(r.horasExtraDiurnas).toBe(1);
+    expect(r.horasExtraNocturnas).toBe(0.5);
+    expect(r.deduccionTiempoFaltante).toBe(7500);
   });
 });

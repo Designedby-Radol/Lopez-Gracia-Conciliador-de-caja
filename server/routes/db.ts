@@ -3,20 +3,25 @@ import { supabaseAdmin, isValidUUID } from "../supabase";
 import { requireAuth, requireGerencia } from "../auth";
 import { writeAudit } from "../audit";
 import { resolverAuxiliares, resolverUsuario, aplanarAuxiliares, type UsuarioEquipo } from "../cierreEquipo";
+import { bumpSessionVersion } from "../sessions";
 
 export const dbRouter = Router();
 dbRouter.use(requireAuth);
 
+/** El detalle (mensaje de Postgres, nombres de tablas…) solo va al log. */
 const fail = (res: any, route: string, err: any, status = 500) => {
   console.error(`Error en ${route}:`, err);
-  return res.status(status).json({ success: false, error: err?.message || String(err) });
+  return res.status(status).json({ success: false, error: "Error interno del servidor." });
 };
 
-/** Gerencia puede consultar cualquier local; el resto solo el suyo. */
-function scopedLocalId(req: Request): string | null {
+/**
+ * Gerencia puede consultar cualquier local (null = todos); el resto solo el suyo.
+ * undefined = usuario sin local asignado: no debe ver datos de ningún local.
+ */
+function scopedLocalId(req: Request): string | null | undefined {
   const requested = (req.query.local_id || req.query.localId) as string | undefined;
   if (req.user!.isGerencia) return isValidUUID(requested) ? requested : null;
-  return req.user!.localId;
+  return req.user!.localId || undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -33,13 +38,19 @@ dbRouter.get("/locales", async (_req, res) => {
 // ---------------------------------------------------------------------------
 dbRouter.get("/usuarios", async (req, res) => {
   const localId = scopedLocalId(req);
-  let query = supabaseAdmin.from("usuarios").select("*, locales(nombre)").order("nombre");
+  if (localId === undefined) return res.json({ success: true, data: [] });
+  // Fuera de Gerencia no se exponen cédula, correo ni rol de los compañeros.
+  const columns = req.user!.isGerencia ? "*, locales(nombre)" : "id, nombre, cargo";
+  let query = supabaseAdmin.from("usuarios").select(columns).order("nombre");
   if (localId) query = query.eq("local_id", localId);
   const { data, error } = await query;
   if (error) return fail(res, "GET /usuarios", error);
 
   // El estado de la cuenta (activo/suspendido) vive en credenciales.
-  const { data: creds } = await supabaseAdmin.from("credenciales").select("usuario_id, activo");
+  const ids = (data || []).map((u: any) => u.id);
+  const { data: creds } = ids.length
+    ? await supabaseAdmin.from("credenciales").select("usuario_id, activo").in("usuario_id", ids)
+    : { data: [] };
   const activos = new Map((creds || []).map((c: any) => [c.usuario_id, c.activo]));
   res.json({
     success: true,
@@ -59,8 +70,21 @@ dbRouter.post("/usuarios", requireGerencia, async (req, res) => {
   if (role !== undefined) payload.role = role;
   if (isValidUUID(local_id)) payload.local_id = local_id;
 
+  let previo: any = null;
+  if (payload.id) {
+    const { data: prev } = await supabaseAdmin.from("usuarios").select("role, cargo, local_id").eq("id", payload.id).maybeSingle();
+    previo = prev;
+  }
+
   const { data, error } = await supabaseAdmin.from("usuarios").upsert(payload, { onConflict: "id" }).select().single();
   if (error) return fail(res, "POST /usuarios", error);
+  if (previo && (previo.role !== data.role || previo.cargo !== data.cargo || previo.local_id !== data.local_id)) {
+    try {
+      await bumpSessionVersion(data.id);
+    } catch (err) {
+      return fail(res, "POST /usuarios (revocar sesiones)", err);
+    }
+  }
   await writeAudit(req, { action: payload.id ? "USER_UPDATED" : "USER_CREATED", targetUser: data.nombre, description: `Cargo: ${data.cargo}` });
   res.json({ success: true, data });
 });
@@ -82,6 +106,14 @@ dbRouter.patch("/usuarios/:id", requireGerencia, async (req, res) => {
 
   const { data, error } = await supabaseAdmin.from("usuarios").update(updates).eq("id", id).select().single();
   if (error) return fail(res, "PATCH /usuarios/:id", error);
+  // Rol y cargo determinan los permisos guardados en la cookie: se cierran sus sesiones.
+  if (role !== undefined || cargo !== undefined) {
+    try {
+      await bumpSessionVersion(id);
+    } catch (err) {
+      return fail(res, "PATCH /usuarios/:id (revocar sesiones)", err);
+    }
+  }
   await writeAudit(req, { action: "ROLE_UPDATED", targetUser: data.nombre, description: `Rol: ${data.role} · Cargo: ${data.cargo}` });
   res.json({ success: true, data });
 });
@@ -186,6 +218,7 @@ async function leerCierre(id: string) {
 
 dbRouter.get("/cierres", async (req, res) => {
   const localId = scopedLocalId(req);
+  if (localId === undefined) return res.json({ success: true, data: [] });
   let query = supabaseAdmin
     .from("cierres_caja")
     .select(CIERRE_SELECT)
@@ -335,6 +368,7 @@ dbRouter.put("/cierres/:id", async (req, res) => {
 // ---------------------------------------------------------------------------
 dbRouter.get("/turnos-nomina", requireGerencia, async (req, res) => {
   const localId = scopedLocalId(req);
+  if (localId === undefined) return res.json({ success: true, data: [] });
   let query = supabaseAdmin.from("turnos_nomina").select("*, usuarios(nombre, cargo)").order("fecha_fin", { ascending: false });
   if (localId) query = query.eq("local_id", localId);
   const { data, error } = await query;

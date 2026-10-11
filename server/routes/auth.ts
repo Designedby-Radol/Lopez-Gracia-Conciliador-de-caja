@@ -15,6 +15,7 @@ import {
   type SessionUser,
 } from "../auth";
 import { writeAudit } from "../audit";
+import { bumpSessionVersion } from "../sessions";
 
 export const authRouter = Router();
 
@@ -32,25 +33,26 @@ interface Credencial {
   password_hash: string | null;
   debe_cambiar: boolean;
   activo: boolean;
+  session_version: number;
 }
 
 async function getCredencial(usuarioId: string): Promise<Credencial | null> {
   const { data } = await supabaseAdmin
     .from("credenciales")
-    .select("usuario_id, password_hash, debe_cambiar, activo")
+    .select("usuario_id, password_hash, debe_cambiar, activo, session_version")
     .eq("usuario_id", usuarioId)
     .maybeSingle();
   return (data as Credencial) || null;
 }
 
-async function upsertCredencial(usuarioId: string, fields: Partial<Omit<Credencial, "usuario_id">>) {
+async function upsertCredencial(usuarioId: string, fields: Partial<Omit<Credencial, "usuario_id" | "session_version">>) {
   const { error } = await supabaseAdmin
     .from("credenciales")
     .upsert({ usuario_id: usuarioId, ...fields, updated_at: new Date().toISOString() }, { onConflict: "usuario_id" });
   if (error) throw error;
 }
 
-function toSessionUser(u: any, mustChangePassword: boolean): SessionUser {
+function toSessionUser(u: any, mustChangePassword: boolean, sessionVersion: number): SessionUser {
   return {
     sub: u.id,
     nombre: u.nombre,
@@ -60,6 +62,7 @@ function toSessionUser(u: any, mustChangePassword: boolean): SessionUser {
     local: u.locales?.nombre || "Chapinero",
     isGerencia: isGerenciaUser(u),
     mustChangePassword,
+    sessionVersion,
   };
 }
 
@@ -136,7 +139,7 @@ authRouter.post("/login", async (req, res) => {
     }
 
     clearAttempts(rlKey);
-    const session = toSessionUser(user, cred.debe_cambiar);
+    const session = toSessionUser(user, cred.debe_cambiar, Number(cred.session_version ?? 0));
     setSessionCookie(res, session);
     await writeAudit(req, { action: "LOGIN_SUCCESS", targetUser: user.nombre, executedBy: user.nombre, description: `Inicio de sesión como ${user.cargo}.` });
 
@@ -181,7 +184,9 @@ authRouter.post("/change-password", async (req, res) => {
       return res.status(401).json({ success: false, error: "La contraseña actual no es correcta." });
     }
     await upsertCredencial(req.user.sub, { password_hash: hashPassword(newPassword), debe_cambiar: false });
-    const updated = { ...req.user, mustChangePassword: false };
+    // Cierra las demás sesiones; esta continúa con la versión nueva.
+    const sessionVersion = await bumpSessionVersion(req.user.sub);
+    const updated = { ...req.user, mustChangePassword: false, sessionVersion };
     setSessionCookie(res, updated);
     await writeAudit(req, { action: "PASSWORD_CHANGED", targetUser: req.user.nombre, description: "El usuario cambió su propia contraseña." });
     res.json({ success: true, user: publicUser(updated) });
@@ -226,6 +231,7 @@ adminRouter.post("/usuarios/:id/password", async (req, res) => {
     if (!target) return res.status(404).json({ success: false, error: "Usuario no encontrado." });
     // Clave temporal: el colaborador deberá cambiarla en su próximo ingreso.
     await upsertCredencial(id, { password_hash: hashPassword(newPassword), debe_cambiar: true });
+    await bumpSessionVersion(id);
     await writeAudit(req, { action: "PASSWORD_CHANGED", targetUser: target.nombre, description: "Gerencia asignó una clave temporal." });
     res.json({ success: true });
   } catch (err: any) {
@@ -245,6 +251,7 @@ adminRouter.post("/usuarios/:id/estado", async (req, res) => {
     const { data: target } = await supabaseAdmin.from("usuarios").select("nombre").eq("id", id).maybeSingle();
     if (!target) return res.status(404).json({ success: false, error: "Usuario no encontrado." });
     await upsertCredencial(id, { activo });
+    await bumpSessionVersion(id);
     await writeAudit(req, {
       action: "USER_STATUS_CHANGED",
       targetUser: target.nombre,
