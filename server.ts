@@ -2,7 +2,8 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { loadSession } from "./server/auth";
+import { loadSession, setSessionStateLookup } from "./server/auth";
+import { lookupSessionState } from "./server/sessions";
 import { authRouter, adminRouter } from "./server/routes/auth";
 import { dbRouter } from "./server/routes/db";
 import { operacionRouter } from "./server/routes/operacion";
@@ -27,6 +28,7 @@ async function startServer() {
     res.setHeader("Referrer-Policy", "same-origin");
     next();
   });
+  setSessionStateLookup(lookupSessionState);
   app.use("/api", loadSession);
 
   app.use("/api/auth", authRouter);

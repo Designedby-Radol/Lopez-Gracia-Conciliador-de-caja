@@ -66,7 +66,8 @@ canalesRouter.get("/justo/ventas", async (req, res) => {
         if (page === 1) {
           const errText = await response.text();
           console.warn(`[Justo API] Error (${response.status}):`, errText);
-          return res.status(response.status).json({ success: false, error: errText });
+          // 502: un 401/403 del proveedor no debe confundirse con la sesión del usuario.
+          return res.status(502).json({ success: false, error: `Justo respondió con error HTTP ${response.status}` });
         }
         break;
       }
@@ -165,7 +166,7 @@ canalesRouter.get("/intuipos/ventas", async (req, res) => {
 
     if (!resp.ok) {
       console.warn(`IntuiPOS API respondió con estado ${resp.status}`);
-      return res.status(resp.status).json({ success: false, error: `IntuiPOS error HTTP ${resp.status}` });
+      return res.status(502).json({ success: false, error: `IntuiPOS error HTTP ${resp.status}` });
     }
 
     const items: any[] = await resp.json();

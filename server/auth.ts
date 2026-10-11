@@ -35,6 +35,8 @@ export interface SessionUser {
   local: string;
   isGerencia: boolean;
   mustChangePassword: boolean;
+  /** credenciales.session_version al emitir la cookie; si cambia en BD, la sesión deja de valer. */
+  sessionVersion: number;
 }
 
 interface SessionPayload extends SessionUser {
@@ -75,6 +77,8 @@ function decodeSession(token: string | undefined): SessionUser | null {
   try {
     const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as SessionPayload;
     if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null;
+    // Cookies emitidas antes de existir session_version no son revocables: se descartan.
+    if (!Number.isInteger(payload.sessionVersion)) return null;
     const { exp: _exp, ...user } = payload;
     return user;
   } catch {
@@ -121,9 +125,56 @@ export function isGerenciaUser(u: { role?: string | null; cargo?: string | null 
   return role === "administrador" || cargo.includes("geren");
 }
 
-/** Carga la sesión (si existe) en req.user. No bloquea. */
-export function loadSession(req: Request, _res: Response, next: NextFunction) {
-  req.user = decodeSession(readCookie(req, COOKIE_NAME)) || undefined;
+// ---------------------------------------------------------------------------
+// Revocación: la cookie lleva session_version y se contrasta con la BD.
+// Suspender, cambiar rol o cambiar/asignar clave incrementa la versión y
+// todas las cookies anteriores dejan de valer (en este proceso de inmediato,
+// en otros procesos al vencer la caché).
+// ---------------------------------------------------------------------------
+export interface SessionState {
+  version: number;
+  activo: boolean;
+}
+
+/** Devuelve el estado actual de la cuenta, o null si no tiene credenciales. */
+export type SessionStateLookup = (usuarioId: string) => Promise<SessionState | null>;
+
+const SESSION_CACHE_TTL_MS = 15 * 1000;
+const sessionCache = new Map<string, { state: SessionState | null; at: number }>();
+let sessionStateLookup: SessionStateLookup | null = null;
+
+export function setSessionStateLookup(fn: SessionStateLookup | null) {
+  sessionStateLookup = fn;
+  sessionCache.clear();
+}
+
+export function invalidateSessionCache(usuarioId?: string) {
+  if (usuarioId) sessionCache.delete(usuarioId);
+  else sessionCache.clear();
+}
+
+async function getSessionState(usuarioId: string): Promise<SessionState | null> {
+  const cached = sessionCache.get(usuarioId);
+  if (cached && Date.now() - cached.at < SESSION_CACHE_TTL_MS) return cached.state;
+  if (!sessionStateLookup) throw new Error("setSessionStateLookup no fue configurado.");
+  const state = await sessionStateLookup(usuarioId);
+  sessionCache.set(usuarioId, { state, at: Date.now() });
+  return state;
+}
+
+/** Carga la sesión (si existe y sigue vigente en BD) en req.user. No bloquea. */
+export async function loadSession(req: Request, _res: Response, next: NextFunction) {
+  req.user = undefined;
+  const user = decodeSession(readCookie(req, COOKIE_NAME));
+  if (user) {
+    try {
+      const state = await getSessionState(user.sub);
+      if (state && state.activo && state.version === user.sessionVersion) req.user = user;
+    } catch (err) {
+      // Si no se puede verificar, la sesión no se acepta (falla cerrado).
+      console.error("No se pudo verificar la versión de sesión:", err);
+    }
+  }
   next();
 }
 
