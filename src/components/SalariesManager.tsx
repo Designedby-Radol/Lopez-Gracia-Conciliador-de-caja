@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { divisorHorasMes, fechasDelPeriodo } from "../lib/payroll";
+import { divisorHorasMes, fechasDelPeriodo, etiquetaRecargoDominical, totalizarTiempoPeriodo, type TiempoDia } from "../lib/payroll";
+import { liquidarQuincena } from "../lib/liquidacionQuincena";
 import { parseIsoDateLocal } from "../lib/dates";
 import { 
   DollarSign, 
@@ -581,118 +582,8 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
   };
 
   // CÁLCULO MATEMÁTICO EN VIVO DE LA QUINCENA
-  const calculateQuincena = (config: EmployeeSalaryConfig, novs: QuincenaNovedades) => {
-    const salarioMensual = config.salarioBaseMensual || smmlvBase;
-    // Hora ordinaria: divisor según la jornada legal vigente al cierre del período (Ley 2101: 42 h → 210)
-    const valorHoraOrdinaria = salarioMensual / divisorHorasMes(fechaFin);
-    const auxDiarioTransporte = auxTransporteBase / 30; // Aux. transporte mensual / 30 días
-
-    let salarioQuincenal = 0;
-    let auxTransporteTotal = 0;
-    let deduccionSalud = 0;
-    let deduccionPension = 0;
-
-    let diasAsistidosEfectivos = 0;
-    let diasLaboradosTotales = 0;
-
-    // Bonos Salariales y No Salariales desde la Ficha Técnica y Novedades
-    // Nota: El monto ingresado en la Ficha Técnica es el valor MENSUAL, por lo tanto en cada quincena se liquida el 50% (mitad en 1ª y mitad en 2ª quincena).
-    const bonosList = config.bonosConfigurados || [];
-    const bonosSalariales = bonosList
-      .filter(b => b.tipologia === "Salarial")
-      .reduce((sum, b) => sum + ((b.monto || 0) / 2), 0);
-
-    const bonosNoSalariales = bonosList
-      .filter(b => b.tipologia === "No Salarial")
-      .reduce((sum, b) => sum + ((b.monto || 0) / 2), 0) + (novs.bonoNoSalarial || 0);
-
-    // Recargos y Horas extra con factores Ley 2026:
-    const valHED = (novs.horasExtraDiurnas || 0) * (valorHoraOrdinaria * 1.25);
-    const valHEN = (novs.horasExtraNocturnas || 0) * (valorHoraOrdinaria * 1.75);
-    
-    // Recargo dominical / festivo (+90% sobre hora ordinaria)
-    const valRecargosDominicales = (novs.recargosDominicales || 0) * (valorHoraOrdinaria * 0.90);
-    
-    // Recargo nocturno (7:00 PM a 7:30 PM en Ventas o extensión): +35% sobre minutos
-    const horasRecargoNocturnoMinutos = (novs.minutosRecargoNocturnoTotal || 0) / 60;
-    const valRecargoNocturnoMinutos = horasRecargoNocturnoMinutos * (valorHoraOrdinaria * 0.35);
-
-    const valTotalRecargos = valRecargosDominicales + valRecargoNocturnoMinutos;
-
-    if (config.tipoContrato === "Por días") {
-      // Reglas para Contrato Por Días:
-      const tcDays = novs.diasTiempoCompleto !== undefined ? novs.diasTiempoCompleto : 4;
-      const mtDays = novs.diasMedioTiempo !== undefined ? novs.diasMedioTiempo : 0;
-      diasAsistidosEfectivos = tcDays + mtDays;
-      diasLaboradosTotales = diasAsistidosEfectivos;
-
-      // Horas ordinarias efectivas:
-      const totalHorasOrdinarias = (tcDays * 7.0) + (mtDays * 5.5);
-      salarioQuincenal = totalHorasOrdinarias * valorHoraOrdinaria;
-
-      // Auxilio de transporte únicamente por día laborado
-      if (config.auxilioTransporteAplica) {
-        auxTransporteTotal = diasAsistidosEfectivos * auxDiarioTransporte;
-      }
-
-      // EXONERACIÓN DE DEDUCCIONES: A personal por días NO se le hacen deducciones de Salud ni Pensión
-      deduccionSalud = 0;
-      deduccionPension = 0;
-    } else {
-      // Reglas para Contrato a Término Indefinido:
-      const diasLaborados = novs.diasLaboradosQuincena !== undefined ? novs.diasLaboradosQuincena : 15;
-      const diasAsistidos = novs.diasAsistidosTransporte !== undefined ? novs.diasAsistidosTransporte : (diasLaborados >= 2 ? diasLaborados - 2 : diasLaborados);
-
-      diasLaboradosTotales = diasLaborados;
-      diasAsistidosEfectivos = diasAsistidos;
-
-      // Salario quincenal proporcional a días laborados (incluye día de descanso semanal remunerado)
-      salarioQuincenal = (salarioMensual / 30) * diasLaborados;
-
-      // Auxilio de transporte pagado ÚNICAMENTE por los días que ASISTIÓ físicamente a trabajar ($8.303,16 COP/día)
-      if (config.auxilioTransporteAplica) {
-        auxTransporteTotal = diasAsistidos * auxDiarioTransporte;
-      }
-
-      // Deducciones de Ley (4% Salud + 4% Pensión sobre IBC que incluye Salario Base Quincenal + Extra + Recargos + Bonos Salariales)
-      const ibcQuincenal = salarioQuincenal + valHED + valHEN + valTotalRecargos + bonosSalariales;
-      deduccionSalud = ibcQuincenal * 0.04;
-      deduccionPension = ibcQuincenal * 0.04;
-    }
-
-    const totalIngresosSalariales = salarioQuincenal + valHED + valHEN + valTotalRecargos + bonosSalariales;
-    const totalIngresosNoSalariales = bonosNoSalariales;
-    const devengadoTotal = totalIngresosSalariales + auxTransporteTotal + totalIngresosNoSalariales;
-
-    const totalDeduccionesLey = deduccionSalud + deduccionPension;
-    const totalDeduccionesOtros = novs.deduccionesAdicionales || 0;
-    const totalDeducciones = totalDeduccionesLey + totalDeduccionesOtros;
-
-    const netoAPagar = devengadoTotal - totalDeducciones;
-
-    return {
-      salarioQuincenal,
-      auxTransporte: auxTransporteTotal,
-      valorHoraOrdinaria,
-      auxDiarioTransporte,
-      diasAsistidosEfectivos,
-      diasLaboradosTotales,
-      valHED,
-      valHEN,
-      valRecargosDominicales,
-      valRecargoNocturnoMinutos,
-      valTotalRecargos,
-      totalIngresosSalariales,
-      totalIngresosNoSalariales,
-      devengadoTotal,
-      deduccionSalud,
-      deduccionPension,
-      totalDeduccionesLey,
-      totalDeduccionesOtros,
-      totalDeducciones,
-      netoAPagar
-    };
-  };
+  const calculateQuincena = (config: EmployeeSalaryConfig, novs: QuincenaNovedades) =>
+    liquidarQuincena(config, novs, { smmlv: smmlvBase, auxTransporteMensual: auxTransporteBase, fechaFin });
 
   // PARSER DE REPORTES DE ASISTENCIA (EXCEL .XLSX / .CSV / PDF)
   const handleProcessAttendanceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -760,8 +651,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
         const memberLogs = posLogsForMember || {};
         const records: AttendanceRecord[] = [];
-        let totalMinutosAFavor = 0;
-        let totalMinutosEnContra = 0;
+        const tiempoPorDia: TiempoDia[] = [];
         let totalMinutosRecargoNocturno = 0;
         let totalHorasDominicalesFestivas = 0;
         let diasAsistidosFisicos = 0;
@@ -864,8 +754,12 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
             totalHorasDominicalesFestivas += evalRes.horasTrabajadasEfectivas;
           }
 
-          totalMinutosAFavor += evalRes.tiempoAdicionalSalidaMinutos;
-          totalMinutosEnContra += (evalRes.tardanzaEntradaMinutos + evalRes.salidaTempranaMinutos);
+          tiempoPorDia.push({
+            extraDiurnaMin: evalRes.extraDiurnaMinutos,
+            extraNocturnaMin: evalRes.extraNocturnaMinutos,
+            faltantesMin: evalRes.faltantesNoCompensadosMinutos,
+            recargoNocturnoMin: evalRes.recargoNocturnoMinutos,
+          });
           totalMinutosRecargoNocturno += evalRes.recargoNocturnoMinutos;
 
           records.push({
@@ -886,19 +780,11 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
           });
         }
 
-        const minutosNetos = totalMinutosAFavor - totalMinutosEnContra;
-        let horasExtraDiurnasNetas = 0;
-        let deduccionTiempoFaltante = 0;
-
         const salarioMensual = config.salarioBaseMensual || smmlvBase;
         const valorHoraOrdinaria = salarioMensual / divisorHorasMes(fechaFin);
-
-        if (minutosNetos > 0) {
-          horasExtraDiurnasNetas = Math.round((minutosNetos / 60) * 10) / 10;
-        } else if (minutosNetos < 0) {
-          const minsFaltantesAbs = Math.abs(minutosNetos);
-          deduccionTiempoFaltante = Math.round((minsFaltantesAbs / 60) * valorHoraOrdinaria);
-        }
+        // Extra diurna (×1,25) y nocturna (×1,75) por separado; faltantes a valor ordinario, sin netear entre días.
+        const { horasExtraDiurnas, horasExtraNocturnas, deduccionTiempoFaltante } =
+          totalizarTiempoPeriodo(tiempoPorDia, valorHoraOrdinaria);
 
         let diasLaboradosCalculados = 15;
         if (isPorDias) {
@@ -910,8 +796,8 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
           diasAsistidosTransporte: diasAsistidosFisicos,
           diasTiempoCompleto: isPorDias ? diasAsistidosFisicos : 0,
           diasMedioTiempo: 0,
-          horasExtraDiurnas: horasExtraDiurnasNetas,
-          horasExtraNocturnas: 0,
+          horasExtraDiurnas,
+          horasExtraNocturnas,
           recargosDominicales: totalHorasDominicalesFestivas,
           minutosRecargoNocturnoTotal: totalMinutosRecargoNocturno,
           bonoNoSalarial: config.bonoFijoQuincenal || 0,
@@ -1891,7 +1777,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                                     <div className="text-[11px] text-zinc-500">{rec.diaSemana}</div>
                                     {rec.isDomingoOFestivo && (
                                       <span className="text-[11px] bg-amber-200 text-amber-900 px-1 py-0.2 rounded font-black uppercase inline-block mt-0.5">
-                                        +90% Dominical/Festivo
+                                        {etiquetaRecargoDominical(rec.fecha)} Dominical/Festivo
                                       </span>
                                     )}
                                   </td>
@@ -2285,7 +2171,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       </div>
 
                       <div className="text-[11px] text-zinc-600 leading-snug">
-                        <strong className="text-zinc-800">Lógica de Recargo Dominical:</strong> Si labora un domingo pero su descanso contractual es p. ej. <em>Martes</em>, el domingo se liquida como ordinario (+0%). Si labora en su día de descanso estipulado o festivo, aplica el incremento legal del +90%.
+                        <strong className="text-zinc-800">Lógica de Recargo Dominical:</strong> Si labora un domingo pero su descanso contractual es p. ej. <em>Martes</em>, el domingo se liquida como ordinario (+0%). Si labora en su día de descanso estipulado o festivo, aplica el recargo legal vigente ({etiquetaRecargoDominical(fechaFin)} para este período; Ley 2466 de 2025: 80% desde jul-2025, 90% desde jul-2026, 100% desde jul-2027).
                       </div>
                     </div>
 

@@ -1,5 +1,5 @@
 import { getColombianHolidays } from "./colombiaHolidays";
-import { minutosNocturnos, duracionTurnoMin } from "../lib/payroll";
+import { duracionTurnoMin, salidaContinuaMin, clasificarTiempoDia, etiquetaRecargoDominical } from "../lib/payroll";
 import { loadXLSX } from "../lib/lazyLibs";
 // Utilitarios y Lógica de Nómina Colombiana con Reglas POS, Festivos y Recargos 2026
 
@@ -409,6 +409,33 @@ export const parseAllTimestampLogsFromText = (
 /**
  * Parsea reportes de asistencia PDF en formato de páginas independientes o documentos consolidados.
  */
+/**
+ * Une dos marcaciones del mismo día: la entrada más temprana y la salida más tardía.
+ * La salida se compara en línea de tiempo continua respecto a su propia entrada, para que
+ * una salida después de medianoche (p. ej. 01:00) gane sobre una de 23:00.
+ */
+export const fusionarMarcacionDia = (existing: PosTimestampLog, log: PosTimestampLog): PosTimestampLog => {
+  const minEntry = parseTimeToMinutes(log.timeEntry) ?? 1440;
+  const existEntry = parseTimeToMinutes(existing.timeEntry) ?? 1440;
+  const finalEntry = minEntry < existEntry ? log.timeEntry : existing.timeEntry;
+
+  const salida = (m: PosTimestampLog) => {
+    const s = parseTimeToMinutes(m.timeExit);
+    if (s === null) return -1;
+    const e = parseTimeToMinutes(m.timeEntry);
+    return e === null ? s : salidaContinuaMin(e, s);
+  };
+  const finalExit = salida(log) > salida(existing) ? log.timeExit : existing.timeExit;
+
+  return {
+    ...existing,
+    timeEntry: finalEntry,
+    timeExit: finalExit,
+    isFestivo: existing.isFestivo || log.isFestivo,
+    isDominical: existing.isDominical || log.isDominical
+  };
+};
+
 export const parsePosPdfPages = (
   pageTexts: string[],
   teamMembers: any[]
@@ -425,21 +452,7 @@ export const parsePosPdfPages = (
     if (!existing) {
       result[memberName][log.dateIso] = log;
     } else {
-      const minEntry = parseTimeToMinutes(log.timeEntry) ?? 1440;
-      const existEntry = parseTimeToMinutes(existing.timeEntry) ?? 1440;
-      const finalEntry = minEntry < existEntry ? log.timeEntry : existing.timeEntry;
-
-      const maxExit = parseTimeToMinutes(log.timeExit) ?? 0;
-      const existExit = parseTimeToMinutes(existing.timeExit) ?? 0;
-      const finalExit = maxExit > existExit ? log.timeExit : existing.timeExit;
-
-      result[memberName][log.dateIso] = {
-        ...existing,
-        timeEntry: finalEntry,
-        timeExit: finalExit,
-        isFestivo: existing.isFestivo || log.isFestivo,
-        isDominical: existing.isDominical || log.isDominical
-      };
+      result[memberName][log.dateIso] = fusionarMarcacionDia(existing, log);
     }
   };
 
@@ -630,7 +643,10 @@ export interface ProcessedDayRecord {
   salidaTempranaMinutos: number; // Salida antes del cierre programado
   tiempoAdicionalSalidaMinutos: number; // Salida después del cierre programado
   horasTrabajadasEfectivas: number;
-  recargoNocturnoMinutos: number; // Minutos trabajados entre 19:00 (7pm) y 06:00 (6am)
+  recargoNocturnoMinutos: number; // Minutos ordinarios entre 19:00 (7pm) y 06:00 (6am); no incluye extra nocturna
+  extraDiurnaMinutos: number; // Hora extra diurna (×1,25) tras reponer faltantes del mismo día
+  extraNocturnaMinutos: number; // Hora extra nocturna (×1,75), desde 19:00
+  faltantesNoCompensadosMinutos: number; // Tardanza + salida anticipada no repuesta; se descuenta a valor ordinario
   observacion: string;
 }
 
@@ -652,10 +668,17 @@ export const evaluateAttendanceDay = (
 ): ProcessedDayRecord => {
   const holidayCheck = checkColombianHolidayOrSunday(fechaStr);
 
-  const actualEntryMins = parseTimeToMinutes(actualEntryStr) ?? parseTimeToMinutes(scheduledEntryStr) ?? 420;
-  const actualExitMins = parseTimeToMinutes(actualExitStr) ?? parseTimeToMinutes(scheduledExitStr) ?? 900;
+  const actualEntryRaw = parseTimeToMinutes(actualEntryStr) ?? parseTimeToMinutes(scheduledEntryStr) ?? 420;
+  const actualExitRaw = parseTimeToMinutes(actualExitStr) ?? parseTimeToMinutes(scheduledExitStr) ?? 900;
   const schedEntryMins = parseTimeToMinutes(scheduledEntryStr) ?? 420;
-  const schedExitMins = parseTimeToMinutes(scheduledExitStr) ?? 900;
+  // Turnos que cruzan medianoche: se trabaja en una línea de tiempo continua (+1440 min).
+  const schedExitMins = salidaContinuaMin(schedEntryMins, parseTimeToMinutes(scheduledExitStr) ?? 900);
+  // En un turno nocturno programado, una entrada de madrugada es llegada tarde, no anticipada.
+  const actualEntryMins = schedExitMins >= 1440 && actualEntryRaw + 720 < schedEntryMins
+    ? actualEntryRaw + 1440
+    : actualEntryRaw;
+  let actualExitMins = actualExitRaw;
+  while (actualExitMins < actualEntryMins) actualExitMins += 1440;
 
   // REGLA 1: Entrada antes del horario programado -> No cuenta.
   let llegadaAntesIgnorada = 0;
@@ -684,17 +707,23 @@ export const evaluateAttendanceDay = (
     tiempoAdicionalSalidaMinutos = actualExitMins - schedExitMins;
   }
 
-  // Duración trabajada efectiva (soporta turnos que cruzan medianoche)
-  const rawWorkMins = Math.max(0, duracionTurnoMin(effectiveWorkStartMins, actualExitMins) - (lunchMinutes || 0));
+  // Duración trabajada efectiva
+  const rawWorkMins = Math.max(0, actualExitMins - effectiveWorkStartMins - (lunchMinutes || 0));
   const horasTrabajadasEfectivas = Math.round((rawWorkMins / 60) * 10) / 10;
 
-  // Recargo nocturno: minutos trabajados dentro de la franja 7:00 p. m. – 6:00 a. m.
-  const recargoNocturnoMinutos = minutosNocturnos(effectiveWorkStartMins, actualExitMins);
+  // Extra diurna / nocturna, faltantes no repuestos y recargo nocturno ordinario (7:00 p. m. – 6:00 a. m.)
+  const tiempo = clasificarTiempoDia({
+    inicioEfectivoMin: effectiveWorkStartMins,
+    salidaProgramadaMin: schedExitMins,
+    salidaRealMin: actualExitMins,
+    faltantesMin: tardanzaEntradaMinutos + salidaTempranaMinutos,
+  });
+  const recargoNocturnoMinutos = tiempo.recargoNocturnoMin;
 
   // Generar observación
   let obs = "";
   if (holidayCheck.isHolidayOrSunday) {
-    obs = `Jornada Dominical/Festiva (+90% Recargo). ${holidayCheck.reason}`;
+    obs = `Jornada Dominical/Festiva (${etiquetaRecargoDominical(fechaStr)} Recargo). ${holidayCheck.reason}`;
   } else if (tardanzaEntradaMinutos > 0) {
     obs = `Llegada tarde de ${tardanzaEntradaMinutos} min.`;
   } else if (salidaTempranaMinutos > 0) {
@@ -724,6 +753,9 @@ export const evaluateAttendanceDay = (
     tiempoAdicionalSalidaMinutos,
     horasTrabajadasEfectivas,
     recargoNocturnoMinutos,
+    extraDiurnaMinutos: tiempo.extraDiurnaMin,
+    extraNocturnaMinutos: tiempo.extraNocturnaMin,
+    faltantesNoCompensadosMinutos: tiempo.faltantesMin,
     observacion: obs
   };
 };
@@ -852,21 +884,7 @@ export const parsePosExcelFile = async (
       if (!existing) {
         result[memberName][log.dateIso] = log;
       } else {
-        const minEntry = parseTimeToMinutes(log.timeEntry) ?? 1440;
-        const existEntry = parseTimeToMinutes(existing.timeEntry) ?? 1440;
-        const finalEntry = minEntry < existEntry ? log.timeEntry : existing.timeEntry;
-
-        const maxExit = parseTimeToMinutes(log.timeExit) ?? 0;
-        const existExit = parseTimeToMinutes(existing.timeExit) ?? 0;
-        const finalExit = maxExit > existExit ? log.timeExit : existing.timeExit;
-
-        result[memberName][log.dateIso] = {
-          ...existing,
-          timeEntry: finalEntry,
-          timeExit: finalExit,
-          isFestivo: existing.isFestivo || log.isFestivo,
-          isDominical: existing.isDominical || log.isDominical
-        };
+        result[memberName][log.dateIso] = fusionarMarcacionDia(existing, log);
       }
     };
 
@@ -944,9 +962,9 @@ export const generatePayrollTirillaJson = (
     const entry = r.horaIngresoMarcada || r.horaIngreso;
     const exit = r.horaSalidaMarcada || r.horaSalida;
     if (entry && entry !== "--:--" && exit && exit !== "--:--") {
-      const eMins = parseTimeToMinutes(entry) || 0;
-      const sMins = parseTimeToMinutes(exit) || 0;
-      if (sMins > eMins) totalMinutos += (sMins - eMins);
+      const eMins = parseTimeToMinutes(entry);
+      const sMins = parseTimeToMinutes(exit);
+      if (eMins !== null && sMins !== null) totalMinutos += duracionTurnoMin(eMins, sMins);
     }
   });
 
