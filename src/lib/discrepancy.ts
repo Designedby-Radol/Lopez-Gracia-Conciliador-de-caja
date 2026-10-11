@@ -205,13 +205,80 @@ export function resolverPosCanales(posData: PosData | null, cierre: CierreParaPo
 }
 
 /**
- * Canales con venta en el POS pero sin valor real ingresado por Gerencia.
- * Aprobar así registraría un faltante igual a toda la venta del canal.
+ * Canales que Gerencia todavía no ha validado:
+ *  - Justo, Rappi, transferencias: venta en el POS sin valor real ingresado
+ *    (aprobar así registra un faltante igual a toda la venta del canal).
+ *  - Efectivo y datáfono: la tienda declaró un valor pero no hay valor POS /
+ *    vouchers confirmado contra el cual compararlo.
  */
-export function canalesSinValidar(i: Pick<ConciliacionInput, "justoPOS" | "rappiPOS" | "transferenciasPOS" | "justoReal" | "rappiReal" | "transferenciasReal">): string[] {
+export function canalesSinValidar(
+  i: Pick<ConciliacionInput, "justoPOS" | "rappiPOS" | "transferenciasPOS" | "justoReal" | "rappiReal" | "transferenciasReal">
+    & Partial<Pick<ConciliacionInput, "efectivoDeclarado" | "efectivoPOS" | "datafonoDeclarado" | "datafonoPOS">>,
+): string[] {
   const out: string[] = [];
+  if ((i.efectivoDeclarado ?? 0) > 0 && !i.efectivoPOS) out.push("Efectivo");
+  if ((i.datafonoDeclarado ?? 0) > 0 && !i.datafonoPOS) out.push("Datáfono");
   if (i.justoPOS > 0 && !i.justoReal) out.push("Justo");
   if (i.rappiPOS > 0 && !i.rappiReal) out.push("Rappi");
   if (i.transferenciasPOS > 0 && !i.transferenciasReal) out.push("Transferencias");
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Valores iniciales del formulario de conciliación
+// ---------------------------------------------------------------------------
+
+export interface CierreParaConciliar {
+  estado?: string | null;
+  efectivoPOS?: number | null;
+  tarjetasPOS?: number | null;
+  transferenciasPOS?: number | null;
+  justoCierre?: number | null;
+  rappiCierre?: number | null;
+  transferenciasCierre?: number | null;
+}
+
+export interface ValoresConciliacion {
+  efectivo: number;
+  datafono: number;
+  justo: number;
+  rappi: number;
+  transferencias: number;
+  transferenciasCoincide: boolean;
+}
+
+/**
+ * Con qué valores arranca la columna "Reales a Conciliar".
+ *
+ * Un cierre ya aprobado muestra lo que se guardó. Uno pendiente NUNCA se
+ * pre-llena con lo declarado por la tienda ni con el propio POS en los
+ * canales que se validan contra una fuente externa (vouchers, portal, banco):
+ * eso dejaría la diferencia en 0 sin que nadie haya validado nada.
+ * Solo se pre-llenan valores que vienen de una fuente independiente:
+ * el efectivo del POS y el total de la API de Justo.
+ */
+export function valoresConciliacionIniciales(
+  cierre: CierreParaConciliar,
+  fuentes: { efectivoPOS?: number | null; justoApi?: number | null } = {},
+): ValoresConciliacion {
+  if (cierre.estado === "Cuadrado") {
+    const transferencias = toPesos(cierre.transferenciasCierre ?? 0);
+    return {
+      efectivo: toPesos(cierre.efectivoPOS ?? 0),
+      datafono: toPesos(cierre.tarjetasPOS ?? 0),
+      justo: toPesos(cierre.justoCierre ?? 0),
+      rappi: toPesos(cierre.rappiCierre ?? 0),
+      transferencias,
+      transferenciasCoincide: transferencias > 0 && transferencias === toPesos(cierre.transferenciasPOS ?? 0),
+    };
+  }
+  const efectivoPOS = fuentes.efectivoPOS ?? cierre.efectivoPOS;
+  return {
+    efectivo: toPesos(efectivoPOS ?? 0),
+    datafono: 0,
+    justo: toPesos(fuentes.justoApi ?? 0),
+    rappi: 0,
+    transferencias: 0,
+    transferenciasCoincide: false,
+  };
 }

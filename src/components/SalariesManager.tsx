@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { divisorHorasMes, fechasDelPeriodo } from "../lib/payroll";
 import { parseIsoDateLocal } from "../lib/dates";
+import { asignarMarcaciones } from "../lib/marcaciones";
 import { 
   DollarSign, 
   Sparkles, 
@@ -39,7 +40,6 @@ import {
 } from "lucide-react";
 import { 
   checkColombianHolidayOrSunday, 
-  matchEmployeeName, 
   parseTimeToMinutes, 
   formatMinutesToTimeStr, 
   evaluateAttendanceDay,
@@ -287,6 +287,8 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
   // PDF / Excel Parser State
   const [isParsingPdf, setIsParsingPdf] = useState(false);
   const [pdfUploadNote, setPdfUploadNote] = useState<string | null>(null);
+  // Resultado de la asignación de marcaciones del último reporte cargado
+  const [marcacionesFaltantes, setMarcacionesFaltantes] = useState<{ sinMarcaciones: string[]; noAsignados: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Alertas de Auditoría (Fase 1) y Modal Tirilla JSON (Fase 2)
@@ -728,6 +730,13 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
         posParsedMap = parsePosPdfPages(pageTexts, teamMembers);
       }
 
+      const asignacion = asignarMarcaciones(posParsedMap, teamMembers);
+      setMarcacionesFaltantes(
+        asignacion.sinMarcaciones.length > 0 || asignacion.noAsignados.length > 0
+          ? { sinMarcaciones: asignacion.sinMarcaciones, noAsignados: asignacion.noAsignados }
+          : null,
+      );
+
       const newNovedades = { ...quincenaNovedades };
       const newAlerts: {
         colaborador: string;
@@ -743,22 +752,8 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
         const config = getEmployeeConfig(member);
         const isPorDias = config.tipoContrato === "Por días";
 
-        let posLogsForMember = posParsedMap[name];
-        if (!posLogsForMember) {
-          const keys = Object.keys(posParsedMap);
-          for (const k of keys) {
-            const matchedMember = matchEmployeeName(k, [member]);
-            if (matchedMember) {
-              posLogsForMember = posParsedMap[k];
-              break;
-            }
-          }
-        }
-        if (!posLogsForMember && Object.keys(posParsedMap).length === 1) {
-          posLogsForMember = posParsedMap[Object.keys(posParsedMap)[0]];
-        }
-
-        const memberLogs = posLogsForMember || {};
+        // Solo marcaciones identificadas con certeza (cédula o nombre + apellido).
+        const memberLogs = asignacion.porEmpleado[name] || {};
         const records: AttendanceRecord[] = [];
         let totalMinutosAFavor = 0;
         let totalMinutosEnContra = 0;
@@ -1480,6 +1475,28 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
               <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-bold rounded-xl flex items-center space-x-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
                 <span>{pdfUploadNote}</span>
+              </div>
+            )}
+
+            {marcacionesFaltantes && (
+              <div className="p-3 bg-amber-50 border border-amber-400 text-amber-950 text-xs rounded-xl space-y-1.5">
+                <div className="flex items-center space-x-2 font-black">
+                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>Revisa las marcaciones antes de liquidar</span>
+                </div>
+                {marcacionesFaltantes.sinMarcaciones.length > 0 && (
+                  <p>
+                    <strong>Sin marcaciones encontradas ({marcacionesFaltantes.sinMarcaciones.length}):</strong>{" "}
+                    {marcacionesFaltantes.sinMarcaciones.join(", ")}. Verifica que el reporte los incluya y que su
+                    cédula o nombre y apellido coincidan con la ficha.
+                  </p>
+                )}
+                {marcacionesFaltantes.noAsignados.length > 0 && (
+                  <p>
+                    <strong>En el reporte pero sin colaborador asociado:</strong>{" "}
+                    {marcacionesFaltantes.noAsignados.join(", ")}.
+                  </p>
+                )}
               </div>
             )}
           </div>

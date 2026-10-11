@@ -77,7 +77,7 @@ import SalariesManager, {
 import SecurityAndRoles from "./SecurityAndRoles";
 import { hrStore } from "../utils/hrStore";
 import { repartirPropinas, repartirPropinasEquitativo } from "../lib/tips";
-import { calcularDiferencias,faltanteCobrable, repartirDescuadre, resolverPosCanales, canalesSinValidar } from "../lib/discrepancy";
+import { calcularDiferencias,faltanteCobrable, repartirDescuadre, resolverPosCanales, canalesSinValidar, valoresConciliacionIniciales, type ValoresConciliacion } from "../lib/discrepancy";
 import { EmployeeProfilesManager } from "./EmployeeProfilesManager";
 import { todayBogota, addDaysIso } from "../lib/dates";
 import { loadPdfjs, loadJsPDF } from "../lib/lazyLibs";
@@ -819,6 +819,15 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     }
   }, [activeTab, auditSubTab, cierres, selectedCierreId]);
 
+  const aplicarValoresConciliacion = (v: ValoresConciliacion) => {
+    setReconcileEfectivo(v.efectivo);
+    setReconcileDatafono(v.datafono);
+    setReconcileJusto(v.justo);
+    setReconcileRappi(v.rappi);
+    setReconcileTransferencias(v.transferencias);
+    setTransferenciasCoincide(v.transferenciasCoincide);
+  };
+
   const handleSelectCierre = async (id: string) => {
     const requestId = ++selectCierreRequestRef.current;
     setSelectedCierreId(id);
@@ -841,19 +850,11 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
           transferenciasPOS: selected.transferenciasPOS || 0,
           fileName: selected.posFileName || (isCuadrado ? "Archivo Procesado" : "Ingreso Manual"),
         });
-        setReconcileEfectivo(selected.efectivoPOS || 0);
-        setReconcileDatafono(selected.tarjetasPOS || 0);
-        setReconcileTransferencias(selected.transferenciasPOS || 0);
-        setTransferenciasCoincide(true);
-        setReconcileJusto(selected.justoCierre || 0);
-        setReconcileRappi(selected.rappiCierre || 0);
+        aplicarValoresConciliacion(valoresConciliacionIniciales(selected));
       } else {
         setPosData(null);
-        setReconcileEfectivo(selected.efectivoCierre);
-        setReconcileDatafono(selected.datafonoCierre);
-        setReconcileTransferencias(selected.transferenciasCierre || selected.transferenciasPOS || 0);
-        setReconcileJusto(selected.justoCierre || selected.justoPOS || 0);
-        setReconcileRappi(selected.rappiCierre || selected.rappiPOS || 0);
+        // Los valores reales arrancan vacíos: Gerencia los digita tras validarlos.
+        aplicarValoresConciliacion(valoresConciliacionIniciales(selected));
 
         try {
           setIsLoadingCanales(true);
@@ -877,7 +878,14 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
             // Si el gerente ya seleccionó otro cierre, descartar esta respuesta.
             if (requestId !== selectCierreRequestRef.current) return;
 
-            // Si IntuiPOS está configurado para ese local, poblar la columna POS y auto-completar canales
+            const justoApi = justoResp?.configurado && justoResp.totalVentas !== undefined
+              ? Number(justoResp.totalVentas) || 0
+              : null;
+
+            // Si IntuiPOS está configurado para ese local, poblar la columna POS.
+            // Datáfono, Rappi y transferencias NO se auto-completan: se validan contra
+            // vouchers, portal y banco. Pre-llenarlos con el POS (o con lo declarado)
+            // dejaría la diferencia en 0 sin validación real.
             if (intuiposResp?.configurado) {
               const posJustoVal = intuiposResp.justoPOS || 0;
               const posRappiVal = intuiposResp.rappiPOS || 0;
@@ -891,33 +899,16 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                 transferenciasPOS: posTransfVal,
                 fileName: "API IntuiPOS",
               });
-              setReconcileEfectivo(intuiposResp.efectivoPOS || 0);
-              // Para tarjetas / datáfonos, la conciliación es contra confirmación manual (vouchers / cierre físico)
-              setReconcileDatafono(selected.datafonoCierre || 0);
+              aplicarValoresConciliacion(
+                valoresConciliacionIniciales(selected, { efectivoPOS: intuiposResp.efectivoPOS || 0, justoApi }),
+              );
 
-              // Auto-completar dato de Justo automáticamente (API Justo o CxC JUSTO del POS)
-              const autoJusto = (justoResp?.configurado && justoResp.totalVentas !== undefined)
-                ? justoResp.totalVentas
-                : posJustoVal;
-              setReconcileJusto(autoJusto);
-
-              // Auto-completar Rappi y Transferencias
-              if (posRappiVal > 0 && (!selected.rappiCierre || selected.rappiCierre === 0)) {
-                setReconcileRappi(posRappiVal);
-              }
-              if (posTransfVal > 0) {
-                setReconcileTransferencias(posTransfVal);
-                setTransferenciasCoincide(true);
-              }
-
-              // Actualizar el cierre en memoria para que la tabla muestre el dato traído automáticamente de las APIs
+              // Actualizar el cierre en memoria con las lecturas POS (no con valores reales)
               setCierres(prev =>
                 prev.map(c => {
                   if (c.id === selected.id) {
                     return {
                       ...c,
-                      justoCierre: c.justoCierre || autoJusto,
-                      transferenciasCierre: c.transferenciasCierre || posTransfVal,
                       justoPOS: posJustoVal,
                       rappiPOS: posRappiVal,
                       transferenciasPOS: posTransfVal,
@@ -928,16 +919,8 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                   return c;
                 })
               );
-            } else if (justoResp?.configurado && justoResp.totalVentas !== undefined) {
-              setReconcileJusto(justoResp.totalVentas || 0);
-              setCierres(prev =>
-                prev.map(c => {
-                  if (c.id === selected.id) {
-                    return { ...c, justoCierre: c.justoCierre || justoResp.totalVentas };
-                  }
-                  return c;
-                })
-              );
+            } else if (justoApi !== null) {
+              setReconcileJusto(justoApi);
             }
           }
         } catch (canalesErr) {
@@ -987,7 +970,7 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
     
     // Auto-populate reconciliation fields with POS parsed values
     setReconcileEfectivo(extracted.efectivoPOS);
-    setReconcileDatafono(extracted.tarjetasPOS);
+    setReconcileDatafono(0); // se valida contra vouchers; el POS queda como referencia
     setReconcileTransferencias(0);
     setTransferenciasCoincide(false);
     setReconcileJusto(0); // Starts at zero as requested
@@ -1040,8 +1023,8 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
     if (sinValidar.length > 0) {
       const ok = window.confirm(
-        `No ingresaste el valor real validado de: ${sinValidar.join(", ")}.\n\n` +
-        `Si apruebas así, se registrará un faltante igual a toda la venta del POS en ese canal` +
+        `No ingresaste el valor validado de: ${sinValidar.join(", ")}.\n\n` +
+        `Si apruebas así, la diferencia de ese canal se calculará contra $0` +
         (reparto.faltante > 0 ? ` y se cobrará al equipo según la política 60/40.` : `.`) +
         `\n\n¿Aprobar de todas formas?`
       );
@@ -2970,9 +2953,15 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
                                     {formatCOP(currentCierre.datafonoCierre)}
                                   </td>
                                   <td className="py-3.5 px-5 text-right font-medium whitespace-nowrap">
-                                    <span className="inline-flex items-center text-[11px] text-zinc-500 bg-zinc-100 border border-zinc-200 px-2 py-0.5 rounded font-sans font-medium">
-                                      N/A (Auditoría manual)
-                                    </span>
+                                    {(posData?.tarjetasPOS ?? currentCierre.tarjetasPOS ?? 0) > 0 ? (
+                                      <span className="text-zinc-500 font-bold tabular-nums" title="Referencia del POS: el valor real se toma de los vouchers">
+                                        {formatCOP(posData?.tarjetasPOS ?? currentCierre.tarjetasPOS ?? 0)}
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center text-[11px] text-zinc-500 bg-zinc-100 border border-zinc-200 px-2 py-0.5 rounded font-sans font-medium">
+                                        N/A (Auditoría manual)
+                                      </span>
+                                    )}
                                   </td>
                                   <td className="py-2.5 px-5 text-right whitespace-nowrap">
                                     <div className="flex justify-end items-center">
@@ -3308,11 +3297,17 @@ export default function ManagerDashboard({ onLogout, username, local = "Chapiner
 
                           {/* Resumen Final de Conciliación */}
                           {(() => {
-                            const totalDif = computeConciliacion(currentCierre).dif.total;
+                            const { dif: { total: totalDif }, sinValidar } = computeConciliacion(currentCierre);
 
                             return (
                               <div className="bg-brand-bg border-2 border-brand-ink p-4 flex flex-col sm:flex-row justify-between items-center gap-3 shadow-[2px_2px_0px_0px_#1C1917]">
                                 <div className="text-center sm:text-left">
+                                  {sinValidar.length > 0 && (
+                                    <span className="flex items-center gap-1 text-[11px] font-bold text-amber-800 mb-1">
+                                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                      Falta validar: {sinValidar.join(", ")}
+                                    </span>
+                                  )}
                                   <span className="text-[11px] text-brand-ink/50 uppercase tracking-wider block font-black">Desfase Acumulado Total</span>
                                   <span className="text-sm font-black font-mono block mt-0.5 text-brand-ink">
                                     {totalDif === 0 

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { supabaseAdmin } from "../supabase";
 import { requireGerencia } from "../auth";
 import { todayBogota } from "../../src/lib/dates";
+import { agruparPagosIntuipos } from "../../src/lib/intuiposCanales";
 
 export const canalesRouter = Router();
 canalesRouter.use(requireGerencia);
@@ -174,74 +175,8 @@ canalesRouter.get("/intuipos/ventas", async (req, res) => {
       return res.status(502).json({ success: false, error: "Respuesta inesperada de IntuiPOS" });
     }
 
-    let efectivoPOS = 0;
-    let justoPOS = 0;          // CUENTAS x COBRAR con DocumentType "CxC JUSTO"
-    let rappiPOS = 0;          // CUENTAS x COBRAR con DocumentType "CxC RAPPI"
-    let tcreditoCredit = 0;
-    let tdebitoCredit = 0;
-    let tcreditoDebit = 0;
-    let tdebitoDebit = 0;
-    let otherTransferCredit = 0;
-    let otherTransferDebit = 0;
-
-    for (const row of items) {
-      // Excluir movimientos administrativos de caja (apertura de base y cierre de caja)
-      const trxType = (row.TransactionType || "").toString().trim().toUpperCase();
-      if (trxType === "BASE-INICIO CAJA" || trxType === "CIERRE DE CAJA") continue;
-
-      // Solo procesar registros activos
-      if (row.PaymentDetailStatus !== "Activo") continue;
-
-      const credit = Number(row.dCredit) || 0;
-      const debit = Number(row.dDebit) || 0;
-      const tipo = Number(row.tiPaymentTypeID);
-      const paymentTypeStr = (row.PaymentType || "").toString().trim().toUpperCase();
-      const docTypeStr = (row.DocumentType || "").toString().trim().toUpperCase();
-
-      // 1. EFECTIVO CAJA
-      if (paymentTypeStr === "EFECTIVO CAJA" || tipo === 1) {
-        efectivoPOS += (credit - debit);
-      }
-      // 2. CUENTAS x COBRAR -> CxC JUSTO
-      else if (docTypeStr === "CXC JUSTO" || (paymentTypeStr.includes("CUENTAS") && docTypeStr.includes("JUSTO"))) {
-        justoPOS += (credit - debit);
-      }
-      // 3. CUENTAS x COBRAR -> CxC RAPPI
-      else if (docTypeStr === "CXC RAPPI" || (paymentTypeStr.includes("CUENTAS") && docTypeStr.includes("RAPPI"))) {
-        rappiPOS += (credit - debit);
-      }
-      // 4. TRANSFERENCIAS POS: (TCREDITO + TDEBITO) - (dDebit facturas debitadas)
-      else if (paymentTypeStr === "TCREDITO" || tipo === 2) {
-        tcreditoCredit += credit;
-        tcreditoDebit += debit;
-      } else if (paymentTypeStr === "TDEBITO" || tipo === 3) {
-        tdebitoCredit += credit;
-        tdebitoDebit += debit;
-      } else if (paymentTypeStr === "TRANSFERENCIA" || paymentTypeStr === "NEQUI" || paymentTypeStr === "PSE" || tipo === 13 || tipo === 83) {
-        otherTransferCredit += credit;
-        otherTransferDebit += debit;
-      }
-    }
-
-    // Transferencias POS = (TCREDITO + TDEBITO) - (dDebit de facturas debitadas)
-    const transferenciasPOS = Math.round(
-      (tcreditoCredit + tdebitoCredit + otherTransferCredit) - (tcreditoDebit + tdebitoDebit + otherTransferDebit)
-    );
-
-    // Tarjetas / datáfonos: según especificación, no se toma directamente como resultado
-    // de conciliación automática sino mediante confirmación manual (vouchers / datáfono físico).
-    const tarjetasPOS = 0;
-
-    return res.json({
-      configurado: true,
-      efectivoPOS: Math.round(efectivoPOS),
-      tarjetasPOS,
-      justoPOS: Math.round(justoPOS),
-      rappiPOS: Math.round(rappiPOS),
-      transferenciasPOS,
-      totalTcredito: Math.round(tcreditoCredit - tcreditoDebit),
-      totalTdebito: Math.round(tdebitoCredit - tdebitoDebit),
-    });
+    // TCREDITO/TDEBITO se reportan como tarjetas (datáfono), separados de transferencias.
+    return res.json({ configurado: true, ...agruparPagosIntuipos(items) });
   } catch (error: any) {
     console.error("Error en /api/canales/intuipos/ventas:", error);
     return res.status(500).json({ success: false, error: error?.message || "Error interno" });
