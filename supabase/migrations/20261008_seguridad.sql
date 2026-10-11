@@ -50,6 +50,7 @@ create table if not exists public.app_config (
 alter table public.usuarios       enable row level security;
 alter table public.locales        enable row level security;
 alter table public.cierres_caja   enable row level security;
+alter table public.cierre_auxiliares enable row level security;
 alter table public.turnos_nomina  enable row level security;
 alter table public.credenciales   enable row level security;
 alter table public.audit_log      enable row level security;
@@ -82,9 +83,56 @@ begin
   end loop;
 end $$;
 
+-- Las funciones de las políticas antiguas ya no se usan y eran SECURITY DEFINER
+-- ejecutables por anon (cualquiera podía llamarlas vía /rest/v1/rpc).
+drop function if exists public.soy_admin();
+drop function if exists public.mi_local_id();
+
+-- ---------- 5. Registro por Supabase Auth ----------
+-- El trigger on_auth_user_created creaba una fila en "usuarios" por cada alta en
+-- Supabase Auth (accesible con la anon key). Con el login nuevo eso permitiría
+-- crear cuentas desde fuera de la app. Se neutraliza la función (no se puede
+-- borrar el trigger porque auth.users no pertenece al rol postgres).
+-- Además: desactivar "Allow new users to sign up" en Authentication → Providers.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  return new;
+end;
+$$;
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
+
+-- ---------- 6. Datos de las filas SYSTEM_* ----------
+-- Perfiles RRHH: SYSTEM_HR_CONFIG → app_config (hr_config:<clave original>).
+insert into public.app_config (key, value)
+select 'hr_config:' || e.key, e.value::jsonb
+from public.cierres_caja c,
+     lateral json_each(c.novedades::json) e
+where c.pos_file_name = 'SYSTEM_HR_CONFIG'
+  and c.novedades ~ '^\s*\{'
+  and e.key <> '_system_test'
+on conflict (key) do nothing;
+
+-- Bitácora antigua: SYSTEM_AUDIT_LOG → audit_log (solo si audit_log está vacía).
+insert into public.audit_log (created_at, action, target_user, executed_by, description, status, ip)
+select coalesce((e->>'timestamp')::timestamptz, now()),
+       coalesce(e->>'action', 'LEGACY'),
+       e->>'targetUser', e->>'executedBy', e->>'description',
+       coalesce(e->>'status', 'success'), e->>'ip'
+from public.cierres_caja c,
+     lateral json_array_elements(c.novedades::json) e
+where c.pos_file_name = 'SYSTEM_AUDIT_LOG'
+  and c.novedades ~ '^\s*\['
+  and not exists (select 1 from public.audit_log);
+
 -- =============================================================================
 -- DESPUÉS de desplegar el nuevo servidor y verificar que todos pueden entrar:
 --   delete from public.cierres_caja
---   where pos_file_name in ('SYSTEM_SECURITY_CONFIG', 'SYSTEM_AUDIT_LOG');
--- (contienen las contraseñas antiguas en texto plano)
+--   where pos_file_name in ('SYSTEM_SECURITY_CONFIG', 'SYSTEM_AUDIT_LOG', 'SYSTEM_HR_CONFIG');
+-- (SECURITY_CONFIG contiene las contraseñas antiguas en texto plano; las otras
+--  dos ya quedaron copiadas en app_config y audit_log)
 -- =============================================================================

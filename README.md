@@ -103,6 +103,7 @@ El navegador ya no recibe ninguna clave de Supabase.
 Ejecuta en Supabase → SQL Editor, en este orden:
 1. `supabase/migrations/20261008_seguridad.sql` (credenciales, auditoría, configuración y RLS)
 2. `supabase/migrations/20261008b_operacion.sql` (inventarios y checklists)
+3. `supabase/migrations/20261008c_alineacion_esquema.sql` (columnas que usa el servidor, nómina, índices y permisos)
 
 En el primer ingreso cada usuario debe cambiar su contraseña. Gerencia asigna claves temporales desde **Seguridad & Roles**.
 

@@ -135,8 +135,9 @@ dbRouter.get("/cierres", async (req, res) => {
   let query = supabaseAdmin
     .from("cierres_caja")
     .select(CIERRE_SELECT)
+    // Las filas SYSTEM_* antiguas están Anuladas, así que este filtro también las excluye.
+    // (Un filtro "pos_file_name not in (...)" ocultaba los pendientes: NULL NOT IN (...) no es verdadero.)
     .neq("estado", "Anulado")
-    .not("pos_file_name", "in", "(SYSTEM_SECURITY_CONFIG,SYSTEM_AUDIT_LOG)")
     .order("fecha", { ascending: false });
   if (localId) query = query.eq("local_id", localId);
   const { data, error } = await query;
@@ -172,6 +173,10 @@ dbRouter.post("/cierres", async (req, res) => {
   }
 
   const { data, error } = await supabaseAdmin.from("cierres_caja").insert(payload).select(CIERRE_SELECT).single();
+  // 23505: otro envío simultáneo ganó la carrera (índice único local + fecha).
+  if (error?.code === "23505") {
+    return res.status(409).json({ success: false, error: "Ya existe un cierre registrado para esta fecha en este local." });
+  }
   if (error) return fail(res, "POST /cierres", error);
   res.json({ success: true, data });
 });

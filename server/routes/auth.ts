@@ -50,28 +50,6 @@ async function upsertCredencial(usuarioId: string, fields: Partial<Omit<Credenci
   if (error) throw error;
 }
 
-/**
- * Configuración antigua (contraseñas en texto plano guardadas en cierres_caja).
- * Solo se usa para migrar cada usuario a credenciales con hash en su primer login.
- */
-async function getLegacySecurityConfig(): Promise<{ passwords: Record<string, string>; statuses: Record<string, string> }> {
-  try {
-    const { data } = await supabaseAdmin
-      .from("cierres_caja")
-      .select("novedades")
-      .eq("pos_file_name", "SYSTEM_SECURITY_CONFIG")
-      .limit(1)
-      .maybeSingle();
-    if (data?.novedades) {
-      const parsed = JSON.parse(data.novedades);
-      return { passwords: parsed.passwords || {}, statuses: parsed.statuses || {} };
-    }
-  } catch {
-    /* sin configuración antigua */
-  }
-  return { passwords: {}, statuses: {} };
-}
-
 function toSessionUser(u: any, mustChangePassword: boolean): SessionUser {
   return {
     sub: u.id,
@@ -140,41 +118,25 @@ authRouter.post("/login", async (req, res) => {
     }
 
     const user: any = matches[0];
-    let cred = await getCredencial(user.id);
 
-    // --- Migración desde el esquema antiguo (texto plano) ---
+    // Sin clave asignada no hay acceso: Gerencia debe asignar una temporal.
+    const cred = await getCredencial(user.id);
     if (!cred?.password_hash) {
-      const legacy = await getLegacySecurityConfig();
-      const keys = [String(user.cedula || "").trim().toLowerCase(), String(user.nombre || "").trim().toLowerCase()].filter(Boolean);
-      const legacyPass = keys.map((k) => legacy.passwords[k]).find(Boolean);
-      const legacySuspended = keys.some((k) => legacy.statuses[k] === "suspended");
-      const fallbackPass = isGerenciaUser(user) ? "admin123" : "tienda";
-      const expected = legacyPass || fallbackPass;
-
-      if (password !== expected) {
-        await writeAudit(req, { action: "LOGIN_FAILED", targetUser: user.nombre, executedBy: "Sistema Auth", description: "Clave incorrecta.", status: "warning" });
-        return genericError();
-      }
-
-      // Las claves antiguas estuvieron expuestas: se migran a hash y se obliga a cambiarlas.
-      await upsertCredencial(user.id, {
-        password_hash: hashPassword(password),
-        debe_cambiar: true,
-        activo: cred ? cred.activo : !legacySuspended,
-      });
-      cred = await getCredencial(user.id);
-    } else if (!verifyPassword(password, cred.password_hash)) {
+      await writeAudit(req, { action: "LOGIN_FAILED", targetUser: user.nombre, executedBy: "Sistema Auth", description: "Usuario sin contraseña asignada.", status: "warning" });
+      return genericError();
+    }
+    if (!verifyPassword(password, cred.password_hash)) {
       await writeAudit(req, { action: "LOGIN_FAILED", targetUser: user.nombre, executedBy: "Sistema Auth", description: "Clave incorrecta.", status: "warning" });
       return genericError();
     }
 
-    if (cred && !cred.activo) {
+    if (!cred.activo) {
       await writeAudit(req, { action: "LOGIN_BLOCKED_SUSPENDED", targetUser: user.nombre, executedBy: "Sistema Auth", description: "Cuenta suspendida.", status: "error" });
       return res.status(403).json({ success: false, error: "Esta cuenta está suspendida. Comunícate con Gerencia." });
     }
 
     clearAttempts(rlKey);
-    const session = toSessionUser(user, cred?.debe_cambiar ?? true);
+    const session = toSessionUser(user, cred.debe_cambiar);
     setSessionCookie(res, session);
     await writeAudit(req, { action: "LOGIN_SUCCESS", targetUser: user.nombre, executedBy: user.nombre, description: `Inicio de sesión como ${user.cargo}.` });
 
