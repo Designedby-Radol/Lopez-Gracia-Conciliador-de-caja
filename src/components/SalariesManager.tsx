@@ -50,6 +50,7 @@ import {
   generatePayrollTirillaJson
 } from "../utils/colombianPayroll";
 import { dbAdapter } from "../db/dbAdapter";
+import { api } from "../lib/api";
 import { loadPdfjs, loadJsPDF } from "../lib/lazyLibs";
 
 // Set up PDF worker
@@ -1042,6 +1043,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
     // Guardar en Supabase turnos_nomina (esperando cada resultado para informar fallas reales)
     const fallidos: string[] = [];
+    const idsGuardados: Record<string, string> = {};
     for (const rec of newRecords) {
       const member = teamMembers.find(m => m.nombre === rec.empleadoNombre);
       if (!member?.id) {
@@ -1049,7 +1051,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
         continue;
       }
       try {
-        await dbAdapter.saveTurnoNomina({
+        const guardado = await dbAdapter.saveTurnoNomina({
           usuarioId: member.id,
           localNameOrId: "Chapinero",
           fechaInicio: rec.periodoInicio,
@@ -1068,10 +1070,15 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
             attendanceRecords: getNovedades(rec.empleadoNombre).attendanceRecords || []
           }
         });
+        if (guardado?.id) idsGuardados[rec.id] = guardado.id;
       } catch (e: any) {
         console.error("Error al guardar turno de nómina:", e);
         fallidos.push(`${rec.empleadoNombre} (${e?.message || "error"})`);
       }
+    }
+    // Con el id de la BD el registro ya se puede publicar como desprendible.
+    if (Object.keys(idsGuardados).length > 0) {
+      setSavedHistory(prev => prev.map(r => (idsGuardados[r.id] ? { ...r, id: idsGuardados[r.id] } : r)));
     }
 
     if (fallidos.length > 0) {
@@ -1147,6 +1154,60 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
       setSelectedMemberName(teamMembers[0].nombre);
     }
   }, [teamMembers]);
+
+  // Desprendibles publicados, por id de liquidación (turnos_nomina)
+  const [desprendiblesPorTurno, setDesprendiblesPorTurno] = useState<Record<string, { id: string; version: number }>>({});
+  const [publicando, setPublicando] = useState(false);
+  const esIdBD = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+  const cargarDesprendibles = async () => {
+    try {
+      const r = await api<{ data: { id: string; turno_nomina_id: string | null; version: number }[] }>("/api/db/desprendibles");
+      const map: Record<string, { id: string; version: number }> = {};
+      for (const d of r.data) if (d.turno_nomina_id) map[d.turno_nomina_id] = { id: d.id, version: d.version };
+      setDesprendiblesPorTurno(map);
+    } catch (e) {
+      console.error("Error al cargar desprendibles publicados:", e);
+    }
+  };
+
+  useEffect(() => {
+    cargarDesprendibles();
+  }, []);
+
+  const handlePublicarDesprendibles = async (turnoIds: string[]) => {
+    const ids = turnoIds.filter(esIdBD);
+    if (ids.length === 0) {
+      alert("No hay liquidaciones guardadas pendientes de publicar. Guarda la quincena en el historial primero.");
+      return;
+    }
+    if (!confirm(`¿Publicar ${ids.length} desprendible(s)? Cada colaborador lo verá en su portal y recibirá un aviso. Si ya había uno publicado para el mismo período, se reemplaza por esta versión.`)) return;
+    setPublicando(true);
+    try {
+      const r = await api<{ data: { publicados: { usuario: string }[]; errores: string[] } }>("/api/db/desprendibles/publicar", {
+        method: "POST",
+        json: { turnoIds: ids },
+      });
+      await cargarDesprendibles();
+      const { publicados, errores } = r.data;
+      alert(`Se publicaron ${publicados.length} desprendible(s).` + (errores.length > 0 ? `\n\nNo se publicaron:\n- ${errores.join("\n- ")}` : ""));
+    } catch (e: any) {
+      alert(`No se pudieron publicar los desprendibles: ${e?.message || "error"}`);
+    } finally {
+      setPublicando(false);
+    }
+  };
+
+  const handleRetirarDesprendible = async (turnoId: string) => {
+    const pub = desprendiblesPorTurno[turnoId];
+    if (!pub || !confirm("¿Retirar este desprendible? El colaborador dejará de verlo en su portal.")) return;
+    try {
+      await api(`/api/db/desprendibles/${encodeURIComponent(pub.id)}/retirar`, { method: "POST" });
+      await cargarDesprendibles();
+    } catch (e: any) {
+      alert(`No se pudo retirar: ${e?.message || "error"}`);
+    }
+  };
 
   // Historial filtrado
   const filteredHistory = savedHistory.filter(item => {
@@ -2322,6 +2383,22 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                   <option key={m.nombre} value={m.nombre}>{m.nombre}</option>
                 ))}
               </select>
+
+              {(() => {
+                const sinPublicar = filteredHistory.filter(r => esIdBD(r.id) && !desprendiblesPorTurno[r.id]).map(r => r.id);
+                return (
+                  <button
+                    type="button"
+                    onClick={() => handlePublicarDesprendibles(sinPublicar)}
+                    disabled={publicando || sinPublicar.length === 0}
+                    className="py-1.5 px-3 text-xs font-bold rounded-lg bg-[#1E3E30] text-white hover:bg-[#163025] disabled:opacity-50 cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                    title="Publica los desprendibles de las liquidaciones visibles que aún no se han publicado"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    {publicando ? "Publicando…" : `Publicar desprendibles (${sinPublicar.length})`}
+                  </button>
+                );
+              })()}
             </div>
           </div>
 
@@ -2347,6 +2424,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                     <th className="p-3 text-right">Devengado</th>
                     <th className="p-3 text-right">Deducciones</th>
                     <th className="p-3 text-right">Neto Pagado</th>
+                    <th className="p-3 text-center">Desprendible</th>
                     <th className="p-3 text-center">Comprobante</th>
                   </tr>
                 </thead>
@@ -2386,6 +2464,30 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
                       <td className="p-3 text-right font-mono font-black text-brand-ink text-sm">
                         {formatCOP(record.netoAPagar)}
+                      </td>
+
+                      <td className="p-3 text-center">
+                        {desprendiblesPorTurno[record.id] ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 text-[11px] font-bold">
+                              Publicado{desprendiblesPorTurno[record.id].version > 1 ? ` · v${desprendiblesPorTurno[record.id].version}` : ""}
+                            </span>
+                            <button type="button" onClick={() => handleRetirarDesprendible(record.id)} className="text-[11px] font-bold text-zinc-500 hover:text-red-700 cursor-pointer">
+                              Retirar
+                            </button>
+                          </div>
+                        ) : esIdBD(record.id) ? (
+                          <button
+                            type="button"
+                            onClick={() => handlePublicarDesprendibles([record.id])}
+                            disabled={publicando}
+                            className="px-2 py-1 rounded-lg border border-[#1E3E30] text-[#1E3E30] text-[11px] font-bold hover:bg-[#E8F3EE] disabled:opacity-50 cursor-pointer"
+                          >
+                            Publicar
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-zinc-400 font-semibold">Sin guardar</span>
+                        )}
                       </td>
 
                       <td className="p-3 text-center">

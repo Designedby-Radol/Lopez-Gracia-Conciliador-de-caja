@@ -7,6 +7,7 @@ import type { SessionUser } from "../auth";
 // ---- Supabase simulado: cada consulta registra sus filtros y devuelve lo que diga `responder`. ----
 interface Consulta { table: string; select?: string; filters: [string, string, unknown][]; op: string }
 const consultas: Consulta[] = [];
+const rpcs: { fn: string; args: any }[] = [];
 let responder: (c: Consulta) => { data: any; error: any } = () => ({ data: [], error: null });
 
 function builder(table: string) {
@@ -24,6 +25,8 @@ function builder(table: string) {
     eq(col: string, v: unknown) { c.filters.push(["eq", col, v]); return b; },
     neq(col: string, v: unknown) { c.filters.push(["neq", col, v]); return b; },
     in(col: string, v: unknown) { c.filters.push(["in", col, v]); return b; },
+    gte(col: string, v: unknown) { c.filters.push(["gte", col, v]); return b; },
+    is(col: string, v: unknown) { c.filters.push(["is", col, v]); return b; },
     single() { return Promise.resolve(responder(c)); },
     maybeSingle() { return Promise.resolve(responder(c)); },
     then(ok: any, ko: any) { return Promise.resolve(responder(c)).then(ok, ko); },
@@ -32,7 +35,10 @@ function builder(table: string) {
 }
 
 vi.mock("../supabase", () => ({
-  supabaseAdmin: { from: (t: string) => builder(t) },
+  supabaseAdmin: {
+    from: (t: string) => builder(t),
+    rpc: (fn: string, args: any) => { rpcs.push({ fn, args }); return Promise.resolve({ data: { id: "d1", version: 1 }, error: null }); },
+  },
   isValidUUID: (id: unknown) => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id),
 }));
 vi.mock("../audit", () => ({ writeAudit: vi.fn(async () => {}) }));
@@ -68,6 +74,7 @@ afterAll(() => { server.close(); vi.unstubAllGlobals(); });
 
 beforeEach(() => {
   consultas.length = 0;
+  rpcs.length = 0;
   bump.mockClear();
   responder = () => ({ data: [], error: null });
   currentUser = colaborador;
@@ -186,5 +193,78 @@ describe("canales: errores del proveedor → 502", () => {
     const { status } = await call(`/api/canales/intuipos/ventas?localId=${LOCAL_A}&fecha=2026-10-01`);
     vi.stubGlobal("fetch", realFetch);
     expect(status).toBe(502);
+  });
+});
+
+describe("GET /cierres: alcance por participación", () => {
+  const OTRO = "33333333-3333-3333-3333-333333333333";
+  const filas = [
+    { id: "c1", fecha: "2026-10-01", estado: "Cuadrado", colaborador_id: OTRO, lider_id: OTRO, auxiliares: [{ usuario_id: USER_ID, usuario: { nombre: "Ana" } }] },
+    { id: "c2", fecha: "2026-10-02", estado: "Cuadrado", colaborador_id: OTRO, lider_id: OTRO, auxiliares: [] },
+    { id: "c3", fecha: "2026-10-03", estado: "Pendiente por Cuadrar", colaborador_id: USER_ID, lider_id: OTRO, auxiliares: [] },
+  ];
+  beforeEach(() => { responder = () => ({ data: filas, error: null }); });
+
+  it("un asistente solo recibe los cierres en los que figura", async () => {
+    const { body } = await call("/api/db/cierres");
+    expect(body.data.map((c: any) => c.id)).toEqual(["c1", "c3"]);
+  });
+
+  it("un líder recibe todos los cierres de su local", async () => {
+    currentUser = { ...colaborador, cargo: "Lider Operador" };
+    const { body } = await call("/api/db/cierres");
+    expect(body.data).toHaveLength(3);
+  });
+});
+
+describe("desprendibles", () => {
+  const TURNO = "44444444-4444-4444-4444-444444444444";
+  const liquidacion = {
+    tipoContrato: "Indefinido", diasLaboradosTotales: 15, diasAsistidosEfectivos: 13,
+    salarioQuincenal: 875000, auxTransporte: 107000, deduccionSalud: 35000, deduccionPension: 35000,
+    totalIngresosSalariales: 875000, devengadoTotal: 982000, totalDeducciones: 70000, netoAPagar: 912000,
+    attendanceRecords: [{ fecha: "2026-10-01", observacion: "nota interna" }],
+  };
+
+  it("solo Gerencia publica", async () => {
+    const { status } = await call("/api/db/desprendibles/publicar", { method: "POST", body: JSON.stringify({ turnoIds: [TURNO] }) });
+    expect(status).toBe(403);
+  });
+
+  it("arma el contenido en el servidor e ignora datos enviados por el cliente", async () => {
+    currentUser = gerencia;
+    responder = (c) => c.table === "turnos_nomina"
+      ? { data: [{ id: TURNO, usuario_id: USER_ID, local_id: LOCAL_A, fecha_inicio: "2026-10-01", fecha_fin: "2026-10-15", quincena_nombre: "Q1 Oct", liquidacion, usuario: { nombre: "Ana", cargo: "Asistente de servicio" } }], error: null }
+      : { data: [], error: null };
+    const { status, body } = await call("/api/db/desprendibles/publicar", {
+      method: "POST",
+      body: JSON.stringify({ turnoIds: [TURNO], neto: 99999999, datos: { conceptos: [] } }),
+    });
+    expect(status).toBe(200);
+    expect(body.data.publicados).toHaveLength(1);
+    expect(rpcs[0].fn).toBe("publicar_desprendible");
+    expect(rpcs[0].args.p_neto).toBe(912000);
+    expect(rpcs[0].args.p_publicado_por).toBe(gerencia.sub);
+    expect(JSON.stringify(rpcs[0].args.p_datos)).not.toContain("nota interna");
+    expect(consultas.some((c) => c.table === "notificaciones" && c.op === "insert")).toBe(true);
+  });
+});
+
+describe("PUT /cierres/:id: solo participantes (o líderes)", () => {
+  const CIERRE = "66666666-6666-6666-6666-666666666666";
+  const OTRO = "33333333-3333-3333-3333-333333333333";
+  const ajeno = { id: CIERRE, estado: "Pendiente por Cuadrar", local_id: LOCAL_A, colaborador_id: OTRO, lider_id: OTRO, auxiliares: [] };
+
+  it("un asistente que no figura en el cierre recibe 403 y no se escribe nada", async () => {
+    responder = () => ({ data: ajeno, error: null });
+    const { status } = await call(`/api/db/cierres/${CIERRE}`, { method: "PUT", body: JSON.stringify({ fecha: "2026-10-16" }) });
+    expect(status).toBe(403);
+    expect(consultas.some((c) => c.op === "update")).toBe(false);
+  });
+
+  it("un auxiliar del cierre sí puede corregirlo mientras está pendiente", async () => {
+    responder = () => ({ data: { ...ajeno, auxiliares: [{ usuario_id: USER_ID }] }, error: null });
+    const { status } = await call(`/api/db/cierres/${CIERRE}`, { method: "PUT", body: JSON.stringify({ fecha: "2026-10-16" }) });
+    expect(status).toBe(200);
   });
 });

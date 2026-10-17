@@ -67,3 +67,20 @@
 
 
 
+/* Hoja inferior "Más" del portal del colaborador */
+@keyframes subir {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* iOS amplía la página al enfocar campos de menos de 16px. */
+@media (max-width: 767px) {
+  input, select, textarea { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

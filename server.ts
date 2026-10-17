@@ -10,6 +10,7 @@ import { operacionRouter } from "./server/routes/operacion";
 import { canalesRouter } from "./server/routes/canales";
 import { geminiRouter } from "./server/routes/gemini";
 import { inventarioPosRouter } from "./server/routes/inventarioPos";
+import { meRouter } from "./server/routes/me";
 
 const PORT = Number(process.env.PORT) || 3000;
 const IS_PROD = process.env.NODE_ENV === "production";
@@ -38,6 +39,7 @@ async function startServer() {
   app.use("/api/canales", canalesRouter);
   app.use("/api/gemini", geminiRouter);
   app.use("/api/inventario-pos", inventarioPosRouter);
+  app.use("/api/me", meRouter);
 
   // Cualquier otra ruta /api devuelve 404 JSON (antes caía en el index.html y
   // el cliente "guardaba" sin enterarse de que la ruta no existía).

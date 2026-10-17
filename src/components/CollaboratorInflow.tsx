@@ -27,7 +27,13 @@ import {
   EyeOff,
   Package,
   ClipboardCheck,
-  Pencil
+  Pencil,
+  Home,
+  TrendingUp,
+  Store,
+  LogOut,
+  MoreHorizontal,
+  X
 } from "lucide-react";
 import { dbAdapter } from "../db/dbAdapter";
 import { api } from "../lib/api";
@@ -36,6 +42,13 @@ import Logo from "./Logo";
 import InventoryClosure from "./InventoryClosure";
 import OperationalChecklist from "./OperationalChecklist";
 import { todayBogota } from "../lib/dates";
+import { esLiderOperador, esCargoPasteleria } from "../lib/metricasEquipo";
+import type { SeccionColaborador } from "./colaborador/types";
+import MiDia from "./colaborador/MiDia";
+import MiDesempeno from "./colaborador/MiDesempeno";
+import PanelPunto from "./colaborador/PanelPunto";
+import MisDesprendibles from "./colaborador/MisDesprendibles";
+import Avisos from "./colaborador/Avisos";
 
 // Configure PDF.js worker
 
@@ -351,7 +364,30 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
     }
   }, [isLeaderRole, username, localRegisteredUsers.leaders]);
 
-  const [activeTab, setActiveTab] = useState<"register" | "inventory" | "checklist" | "password">("register");
+  const [activeTab, setActiveTab] = useState<SeccionColaborador>("inicio");
+  const [masAbierto, setMasAbierto] = useState(false);
+  const esLiderOp = esLiderOperador(role);
+  const esPasteleria = esCargoPasteleria(role);
+
+  // Pastelería no maneja caja: su día empieza por checklist e inventario.
+  const navItems = useMemo(() => {
+    const item = (id: SeccionColaborador, label: string, icon: React.ReactNode) => ({ id, label, icon });
+    const inicio = item("inicio", "Inicio", <Home className="w-4 h-4" />);
+    const caja = item("register", "Cierre de caja", <PlusCircle className="w-4 h-4" />);
+    const checklist = item("checklist", "Checklist", <ClipboardCheck className="w-4 h-4" />);
+    const inventario = item("inventory", "Inventario", <Package className="w-4 h-4" />);
+    const desempeno = item("desempeno", "Mi desempeño", <TrendingUp className="w-4 h-4" />);
+    const punto = item("punto", "Punto", <Store className="w-4 h-4" />);
+    const desprendibles = item("desprendibles", "Desprendibles", <FileText className="w-4 h-4" />);
+    const seguridad = item("password", "Seguridad", <Lock className="w-4 h-4" />);
+    return esPasteleria
+      ? [inicio, checklist, inventario, desempeno, caja, desprendibles, seguridad]
+      : [inicio, caja, checklist, desempeno, ...(esLiderOp ? [punto] : []), inventario, desprendibles, seguridad];
+  }, [esPasteleria, esLiderOp]);
+  // Los paneles de métricas usan el ancho de pantallas grandes; los formularios conservan su ancho de lectura.
+  const vistaAncha = activeTab === "inicio" || activeTab === "desempeno" || activeTab === "punto";
+  const navPrincipal = navItems.slice(0, 4);
+  const navMas = navItems.slice(4);
   const [cajaSubTab, setCajaSubTab] = useState<"form" | "history">("form");
   const [history, setHistory] = useState<CierreCaja[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -601,108 +637,83 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
     }
   };
 
+  const go = (s: SeccionColaborador) => {
+    if (s === "punto" && !esLiderOp) return;
+    if (s === "register") setSuccessData(null);
+    setActiveTab(s);
+    setMasAbierto(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-[#1C2E24] flex flex-col selection:bg-[#1E3E30]/10 relative">
-      {/* Barra de Navegación del Colaborador */}
-      <header className="bg-white border-b border-slate-200/80 py-3.5 px-6 flex items-center justify-between sticky top-0 z-30 shadow-[0_1px_3px_0_rgba(0,0,0,0.02)]">
-        <div className="flex items-center space-x-3.5">
-          <div className="bg-[#1E3E30]/5 p-2 rounded-xl border border-[#1E3E30]/10 flex items-center justify-center">
-            <Logo size="sm" className="text-[#1E3E30]" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-sm font-extrabold tracking-tight text-slate-900">
-                López & Gracia
-              </h1>
-              <span className="bg-emerald-50 text-emerald-700 text-[11px] font-bold px-2 py-0.5 rounded-full border border-emerald-200/50">
-                Punto {local}
-              </span>
+    <div className="min-h-dvh bg-[#F8F9FA] text-[#1C2E24] flex flex-col selection:bg-[#1E3E30]/15 relative">
+      {/* Cabecera */}
+      <header className="bg-white/95 backdrop-blur-sm border-b border-slate-200/80 px-4 sm:px-6 lg:px-8 sticky top-0 z-30 pt-[env(safe-area-inset-top)]">
+        <div className="max-w-7xl mx-auto h-16 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="bg-[#1E3E30]/5 p-2 rounded-xl border border-[#1E3E30]/10 flex items-center justify-center shrink-0">
+              <Logo size="sm" className="text-[#1E3E30]" />
             </div>
-            <p className="text-xs text-slate-500 font-medium mt-0.5">
-              Portal Operativo & Ingreso Diario
-            </p>
+            <div className="min-w-0">
+              <p className="text-sm font-extrabold tracking-tight text-slate-900 truncate">López & Gracia</p>
+              <p className="text-xs text-slate-500 font-medium truncate">Punto {local}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="hidden sm:flex flex-col text-right pr-1">
+              <span className="text-xs text-slate-900 font-bold">{username}</span>
+              <span className="text-[11px] font-semibold text-slate-500">{role}</span>
+            </div>
+            <Avisos onNavigate={go} />
+            <button
+              onClick={onLogout}
+              aria-label="Cerrar sesión"
+              className="h-10 px-3 inline-flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1E3E30]"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Cerrar sesión</span>
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center space-x-3">
-          <div className="hidden sm:flex flex-col text-right pr-2">
-            <span className="text-xs text-slate-900 font-bold">{username}</span>
-            <span className="text-[11px] font-semibold text-slate-400">Rol: {role}</span>
-          </div>
-          <button
-            onClick={onLogout}
-            className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 shadow-xs hover:border-slate-300 transition-all cursor-pointer"
-          >
-            Cerrar Sesión
-          </button>
-        </div>
+        {/* Pestañas (escritorio y tablet) */}
+        <nav aria-label="Secciones" className="hidden lg:block max-w-7xl mx-auto -mb-px">
+          <ul className="flex gap-1 overflow-x-auto">
+            {navItems.map((it) => {
+              const activo = activeTab === it.id;
+              return (
+                <li key={it.id}>
+                  <button
+                    type="button"
+                    onClick={() => go(it.id)}
+                    aria-current={activo ? "page" : undefined}
+                    className={`flex items-center gap-2 px-3.5 py-3 text-xs font-bold border-b-2 whitespace-nowrap cursor-pointer transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#1E3E30] ${
+                      activo ? "border-[#1E3E30] text-[#1E3E30]" : "border-transparent text-slate-500 hover:text-slate-900"
+                    }`}
+                  >
+                    {it.icon}
+                    {it.label}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
       </header>
 
       {/* Contenedor Principal */}
-      <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 md:p-8 flex flex-col justify-start relative z-10">
-        
-        {/* Selector de Pestañas Principal con Alto Contraste */}
-        <div className="flex flex-wrap bg-[#1E3E30] p-1.5 rounded-2xl shadow-md border border-[#163025] mb-6 gap-1.5">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab("register");
-              setSuccessData(null);
-            }}
-            className={`flex-1 min-w-[130px] py-2.5 px-3.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
-              activeTab === "register"
-                ? "bg-white text-[#1E3E30] shadow-sm font-extrabold"
-                : "text-emerald-100/90 hover:text-white hover:bg-white/15"
-            }`}
-          >
-            <PlusCircle className={`w-4 h-4 ${activeTab === "register" ? "text-[#1E3E30]" : "text-emerald-300"}`} />
-            <span>Cierre de Caja</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab("inventory");
-            }}
-            className={`flex-1 min-w-[130px] py-2.5 px-3.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
-              activeTab === "inventory"
-                ? "bg-white text-[#1E3E30] shadow-sm font-extrabold"
-                : "text-emerald-100/90 hover:text-white hover:bg-white/15"
-            }`}
-          >
-            <Package className={`w-4 h-4 ${activeTab === "inventory" ? "text-amber-600" : "text-amber-300"}`} />
-            <span>Cierre Inventario</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab("checklist");
-            }}
-            className={`flex-1 min-w-[130px] py-2.5 px-3.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
-              activeTab === "checklist"
-                ? "bg-white text-[#1E3E30] shadow-sm font-extrabold"
-                : "text-emerald-100/90 hover:text-white hover:bg-white/15"
-            }`}
-          >
-            <ClipboardCheck className={`w-4 h-4 ${activeTab === "checklist" ? "text-emerald-700" : "text-emerald-300"}`} />
-            <span>Checklist Operativo</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab("password");
-            }}
-            className={`flex-1 min-w-[130px] py-2.5 px-3.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
-              activeTab === "password"
-                ? "bg-white text-[#1E3E30] shadow-sm font-extrabold"
-                : "text-emerald-100/90 hover:text-white hover:bg-white/15"
-            }`}
-          >
-            <Lock className={`w-4 h-4 ${activeTab === "password" ? "text-slate-700" : "text-emerald-300"}`} />
-            <span>Seguridad</span>
-          </button>
-        </div>
+      <main className={`flex-1 ${vistaAncha ? "max-w-7xl" : "max-w-5xl"} w-full mx-auto px-4 pt-5 pb-28 sm:px-6 lg:px-8 md:pt-8 lg:pb-12 flex flex-col justify-start relative z-10`}>
 
-        {activeTab === "inventory" ? (
+        {activeTab === "inicio" ? (
+          <MiDia onNavigate={go} />
+        ) : activeTab === "desempeno" ? (
+          <MiDesempeno />
+        ) : activeTab === "punto" && esLiderOp ? (
+          <PanelPunto local={local} />
+        ) : activeTab === "desprendibles" ? (
+          <MisDesprendibles />
+        ) : activeTab === "inventory" ? (
           <InventoryClosure
             username={username}
             userRole={role}
@@ -1693,6 +1704,79 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
       </div>
     )}
   </main>
+
+      {/* Navegación inferior (celular) */}
+      <nav
+        aria-label="Secciones"
+        className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-sm border-t border-slate-200 pb-[env(safe-area-inset-bottom)]"
+      >
+        <ul className="grid grid-cols-5">
+          {navPrincipal.map((it) => {
+            const activo = activeTab === it.id;
+            return (
+              <li key={it.id}>
+                <button
+                  type="button"
+                  onClick={() => go(it.id)}
+                  aria-current={activo ? "page" : undefined}
+                  className={`w-full h-16 flex flex-col items-center justify-center gap-1 text-[11px] font-bold cursor-pointer select-none [-webkit-tap-highlight-color:transparent] ${
+                    activo ? "text-[#1E3E30]" : "text-slate-500"
+                  }`}
+                >
+                  <span className={`px-3 py-1 rounded-full transition-colors ${activo ? "bg-[#E8F3EE]" : ""}`}>{it.icon}</span>
+                  <span className="truncate max-w-full px-1">{it.id === "register" ? "Caja" : it.id === "desempeno" ? "Desempeño" : it.label}</span>
+                </button>
+              </li>
+            );
+          })}
+          <li>
+            <button
+              type="button"
+              onClick={() => setMasAbierto(true)}
+              aria-haspopup="dialog"
+              aria-expanded={masAbierto}
+              className={`w-full h-16 flex flex-col items-center justify-center gap-1 text-[11px] font-bold cursor-pointer select-none [-webkit-tap-highlight-color:transparent] ${
+                navMas.some((it) => it.id === activeTab) ? "text-[#1E3E30]" : "text-slate-500"
+              }`}
+            >
+              <span className={`px-3 py-1 rounded-full ${navMas.some((it) => it.id === activeTab) ? "bg-[#E8F3EE]" : ""}`}>
+                <MoreHorizontal className="w-4 h-4" />
+              </span>
+              <span>Más</span>
+            </button>
+          </li>
+        </ul>
+      </nav>
+
+      {masAbierto && (
+        <div className="lg:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Más secciones">
+          <button type="button" aria-label="Cerrar" onClick={() => setMasAbierto(false)} className="absolute inset-0 bg-slate-900/30 cursor-default" />
+          <div className="absolute bottom-0 inset-x-0 bg-white rounded-t-3xl pt-2 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-12px_32px_-12px_rgba(28,46,36,0.3)] animate-[subir_220ms_cubic-bezier(0.16,1,0.3,1)]">
+            <div className="flex items-center justify-between px-5 py-3">
+              <p className="text-sm font-extrabold text-slate-900">Más secciones</p>
+              <button type="button" onClick={() => setMasAbierto(false)} aria-label="Cerrar" className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <ul className="px-3">
+              {navMas.map((it) => (
+                <li key={it.id}>
+                  <button
+                    type="button"
+                    onClick={() => go(it.id)}
+                    className={`w-full flex items-center gap-3 px-3 py-3.5 rounded-xl text-sm font-bold cursor-pointer ${
+                      activeTab === it.id ? "bg-[#E8F3EE] text-[#1E3E30]" : "text-slate-800 hover:bg-slate-50"
+                    }`}
+                  >
+                    {it.icon}
+                    {it.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -4,9 +4,17 @@ import { requireAuth, requireGerencia } from "../auth";
 import { writeAudit } from "../audit";
 import { resolverAuxiliares, resolverUsuario, aplanarAuxiliares, type UsuarioEquipo } from "../cierreEquipo";
 import { bumpSessionVersion } from "../sessions";
+import { notificar, avisosPorCierre } from "../notificaciones";
+import { construirDesprendible } from "../desprendibles";
+import { esCargoLider, rolEnCierre } from "../../src/lib/metricasEquipo";
 
 export const dbRouter = Router();
 dbRouter.use(requireAuth);
+// Cierres, nómina y desprendibles no deben quedar en caché del navegador ni de un proxy.
+dbRouter.use((_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store, private");
+  next();
+});
 
 /** El detalle (mensaje de Postgres, nombres de tablas…) solo va al log. */
 const fail = (res: any, route: string, err: any, status = 500) => {
@@ -229,7 +237,13 @@ dbRouter.get("/cierres", async (req, res) => {
   if (localId) query = query.eq("local_id", localId);
   const { data, error } = await query;
   if (error) return fail(res, "GET /cierres", error);
-  res.json({ success: true, data: (data || []).map(aplanarAuxiliares) });
+  let cierres = (data || []).map(aplanarAuxiliares);
+  // Gerencia y líderes ven todo su local; el resto, solo los cierres en los que figura
+  // (antes recibían los montos y descuadres de todo el equipo aunque la pantalla los ocultara).
+  if (!req.user!.isGerencia && !esCargoLider(req.user!.cargo)) {
+    cierres = cierres.filter((c: any) => rolEnCierre(c, req.user!.sub) !== null);
+  }
+  res.json({ success: true, data: cierres });
 });
 
 dbRouter.post("/cierres", async (req, res) => {
@@ -288,7 +302,7 @@ dbRouter.put("/cierres/:id", async (req, res) => {
 
   const { data: existing, error: getErr } = await supabaseAdmin
     .from("cierres_caja")
-    .select("id, estado, local_id, colaborador_id")
+    .select("id, estado, local_id, colaborador_id, lider_id, auxiliares:cierre_auxiliares(usuario_id)")
     .eq("id", id)
     .maybeSingle();
   if (getErr) return fail(res, "PUT /cierres/:id", getErr);
@@ -312,6 +326,10 @@ dbRouter.put("/cierres/:id", async (req, res) => {
     // El equipo de tienda solo puede corregir su arqueo mientras siga pendiente.
     if (existing.local_id !== user.localId) {
       return res.status(403).json({ success: false, error: "No puedes modificar cierres de otro local." });
+    }
+    // Mismo alcance que GET /cierres: fuera de los líderes, solo quien figura en el cierre.
+    if (!esCargoLider(user.cargo) && rolEnCierre(aplanarAuxiliares(existing), user.sub) === null) {
+      return res.status(403).json({ success: false, error: "Solo puedes modificar cierres en los que participaste." });
     }
     if (existing.estado !== ESTADO_PENDIENTE) {
       return res.status(409).json({ success: false, error: "Este cierre ya fue auditado y no se puede modificar." });
@@ -359,6 +377,7 @@ dbRouter.put("/cierres/:id", async (req, res) => {
       targetUser: data.colaborador?.nombre,
       description: `Cierre ${data.fecha}: ${existing.estado} → ${updates.estado}`,
     });
+    await notificar(avisosPorCierre(data, String(updates.estado)));
   }
   res.json({ success: true, data });
 });
@@ -403,6 +422,109 @@ dbRouter.delete("/turnos-nomina/:id", requireGerencia, async (req, res) => {
   if (!isValidUUID(id)) return res.status(400).json({ success: false, error: "ID inválido." });
   const { error } = await supabaseAdmin.from("turnos_nomina").delete().eq("id", id);
   if (error) return fail(res, "DELETE /turnos-nomina/:id", error);
+  res.json({ success: true });
+});
+
+// ---------------------------------------------------------------------------
+// Desprendibles (solo Gerencia publica; el empleado los lee en /api/me)
+// ---------------------------------------------------------------------------
+dbRouter.get("/desprendibles", requireGerencia, async (req, res) => {
+  const localId = scopedLocalId(req);
+  if (localId === undefined) return res.json({ success: true, data: [] });
+  let query = supabaseAdmin
+    .from("desprendibles")
+    .select("id, usuario_id, turno_nomina_id, fecha_inicio, fecha_fin, quincena_nombre, version, estado, neto, publicado_at, usuario:usuarios!usuario_id(nombre)")
+    .eq("estado", "publicado")
+    .order("fecha_fin", { ascending: false });
+  if (localId) query = query.eq("local_id", localId);
+  const { data, error } = await query;
+  if (error) return fail(res, "GET /desprendibles", error);
+  res.json({ success: true, data: data || [] });
+});
+
+/**
+ * Publica los desprendibles de las liquidaciones indicadas. El contenido se arma
+ * en el servidor desde turnos_nomina: el cliente solo elige cuáles publicar.
+ */
+dbRouter.post("/desprendibles/publicar", requireGerencia, async (req, res) => {
+  const turnoIds: string[] = Array.isArray(req.body?.turnoIds) ? req.body.turnoIds.filter(isValidUUID) : [];
+  if (turnoIds.length === 0 || turnoIds.length > 200) {
+    return res.status(400).json({ success: false, error: "Indica entre 1 y 200 liquidaciones a publicar." });
+  }
+  const { data: turnos, error } = await supabaseAdmin
+    .from("turnos_nomina")
+    .select("id, usuario_id, local_id, fecha_inicio, fecha_fin, quincena_nombre, liquidacion, usuario:usuarios(nombre, cargo)")
+    .in("id", turnoIds);
+  if (error) return fail(res, "POST /desprendibles/publicar", error);
+
+  const publicados: { id: string; usuario: string; version: number }[] = [];
+  const errores: string[] = [];
+  for (const t of turnos || []) {
+    const usuario = (t as any).usuario || { nombre: "Sin nombre" };
+    try {
+      const d = construirDesprendible(t.liquidacion, usuario);
+      const { data: fila, error: rpcErr } = await supabaseAdmin.rpc("publicar_desprendible", {
+        p_usuario_id: t.usuario_id,
+        p_local_id: t.local_id,
+        p_turno_nomina_id: t.id,
+        p_fecha_inicio: t.fecha_inicio,
+        p_fecha_fin: t.fecha_fin,
+        p_quincena_nombre: t.quincena_nombre,
+        p_datos: d.datos,
+        p_devengado: d.devengado,
+        p_deducciones: d.deducciones,
+        p_neto: d.neto,
+        p_publicado_por: req.user!.sub,
+      });
+      if (rpcErr) throw rpcErr;
+      const version = (fila as any)?.version ?? 1;
+      publicados.push({ id: (fila as any)?.id, usuario: usuario.nombre, version });
+      const periodo = t.quincena_nombre || `${t.fecha_inicio} a ${t.fecha_fin}`;
+      await notificar([
+        {
+          usuario_id: t.usuario_id,
+          tipo: "desprendible",
+          titulo: version > 1 ? `Tu desprendible de ${periodo} fue corregido` : `Tu desprendible de ${periodo} está disponible`,
+          mensaje: "Lo encuentras en Mis desprendibles.",
+          ref_tipo: "desprendible",
+          ref_id: (fila as any)?.id ?? null,
+        },
+      ]);
+    } catch (err: any) {
+      console.error("Error publicando desprendible:", err);
+      errores.push(`${usuario.nombre}: ${err instanceof Error && err.message.startsWith("La liquidación") ? err.message : "no se pudo publicar"}`);
+    }
+  }
+  const encontrados = new Set((turnos || []).map((t) => t.id));
+  const faltantes = turnoIds.filter((id) => !encontrados.has(id)).length;
+  if (faltantes > 0) errores.push(`${faltantes} liquidación(es) no existen.`);
+
+  if (publicados.length > 0) {
+    await writeAudit(req, {
+      action: "DESPRENDIBLES_PUBLICADOS",
+      description: publicados.map((p) => `${p.usuario} (v${p.version})`).join(", "),
+    });
+  }
+  res.json({ success: true, data: { publicados, errores } });
+});
+
+dbRouter.post("/desprendibles/:id/retirar", requireGerencia, async (req, res) => {
+  const { id } = req.params;
+  if (!isValidUUID(id)) return res.status(400).json({ success: false, error: "ID inválido." });
+  const { data, error } = await supabaseAdmin
+    .from("desprendibles")
+    .update({ estado: "retirado", retirado_por: req.user!.sub, retirado_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("estado", "publicado")
+    .select("id, fecha_inicio, fecha_fin, usuario:usuarios!usuario_id(nombre)")
+    .maybeSingle();
+  if (error) return fail(res, "POST /desprendibles/:id/retirar", error);
+  if (!data) return res.status(404).json({ success: false, error: "No hay un desprendible publicado con ese ID." });
+  await writeAudit(req, {
+    action: "DESPRENDIBLE_RETIRADO",
+    targetUser: (data as any).usuario?.nombre,
+    description: `${data.fecha_inicio} a ${data.fecha_fin}`,
+  });
   res.json({ success: true });
 });
 
