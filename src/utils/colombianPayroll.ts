@@ -1,4 +1,6 @@
-import * as XLSX from "xlsx";
+import { getColombianHolidays } from "./colombiaHolidays";
+import { duracionTurnoMin, salidaContinuaMin, clasificarTiempoDia, etiquetaRecargoDominical } from "../lib/payroll";
+import { loadXLSX } from "../lib/lazyLibs";
 // Utilitarios y Lógica de Nómina Colombiana con Reglas POS, Festivos y Recargos 2026
 
 // Calendario de Días Festivos Oficiales Colombia 2026 (Ley Emiliani)
@@ -69,9 +71,12 @@ export const checkColombianHolidayOrSunday = (dateStr: string): { isHolidayOrSun
     }
   }
 
-  // Verificar en mapa de festivos
+  // Verificar festivos (nombre si está en la tabla 2026; cálculo general para cualquier año)
   if (COLOMBIAN_HOLIDAYS_2026[normalizedDate]) {
     return { isHolidayOrSunday: true, reason: `Festivo Nacional: ${COLOMBIAN_HOLIDAYS_2026[normalizedDate]}` };
+  }
+  if (y && getColombianHolidays(y).has(normalizedDate)) {
+    return { isHolidayOrSunday: true, reason: "Festivo Nacional" };
   }
 
   // Verificar si es Domingo
@@ -208,70 +213,61 @@ export const parsePosDateToIsoWithFormat = (dateStr: string, format: "DD/MM/YYYY
   return dateStr;
 };
 
+/** Posiciones de `phrase` en `textClean` como palabra(s) completa(s) (ambos ya normalizados). */
+const findWholeWordPositions = (textClean: string, phrase: string): number[] => {
+  const positions: number[] = [];
+  if (!phrase) return positions;
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(textClean)) !== null) positions.push(m.index);
+  return positions;
+};
+
+const STOPWORDS_NOMBRE = ["del", "los", "las", "san", "de"];
+
+/** Tokens significativos de un nombre normalizado. */
+const nameTokens = (normalized: string): string[] =>
+  normalized.split(" ").filter(t => t.length >= 2 && !STOPWORDS_NOMBRE.includes(t));
+
+const cleanCedulaOf = (member: any): string =>
+  typeof member === "object" && member?.cedula ? String(member.cedula).replace(/[^\d]/g, "") : "";
+
 /**
  * Busca las posiciones en el texto donde un colaborador es identificado como encabezado o sección.
+ *
+ * Solo acepta identificaciones seguras: cédula exacta (como número completo) o un
+ * nombre con al menos 2 palabras (nombre + apellido, en cualquier orden). Un solo
+ * nombre ("Ana") no basta: asignaría las marcaciones de otra persona.
  */
 export const findEmployeeHeaderPositionsInText = (text: string, member: any): number[] => {
-  const positions: number[] = [];
   const memberName = typeof member === "string" ? member : member?.nombre;
-  if (!memberName || !text) return positions;
+  if (!memberName || !text) return [];
 
   const textClean = normalizeText(text);
 
   // 1. Coincidencia por Cédula (Prioridad Máxima - 100% Exacto)
-  if (typeof member === "object" && member?.cedula) {
-    const cleanCedula = member.cedula.toString().trim();
-    if (cleanCedula.length >= 5) {
-      let idx = -1;
-      while ((idx = textClean.indexOf(cleanCedula, idx + 1)) !== -1) {
-        positions.push(idx);
-      }
-      if (positions.length > 0) return positions;
-    }
+  const cleanCedula = cleanCedulaOf(member);
+  if (cleanCedula.length >= 5) {
+    const byCedula = findWholeWordPositions(textClean, cleanCedula);
+    if (byCedula.length > 0) return byCedula;
   }
+
+  const memberClean = normalizeText(memberName);
+  const tokens = nameTokens(memberClean);
+  if (tokens.length < 2) return [];
 
   // 2. Coincidencia por Nombre Completo
-  const memberClean = normalizeText(memberName);
-  let idx = -1;
-  while ((idx = textClean.indexOf(memberClean, idx + 1)) !== -1) {
-    positions.push(idx);
-  }
+  const byFullName = findWholeWordPositions(textClean, memberClean);
+  if (byFullName.length > 0) return byFullName;
 
-  if (positions.length > 0) return positions;
-
-  // 3. Coincidencia por Apellidos / Nombres Invertidos (ej. "YEPES PAULA" vs "PAULA YEPES")
-  const tokens = memberClean.split(" ").filter(t => t.length >= 3 && !["del", "los", "las", "san", "de"].includes(t));
-  if (tokens.length >= 2) {
-    const short1 = `${tokens[0]} ${tokens[tokens.length - 1]}`;
-    const short2 = `${tokens[tokens.length - 1]} ${tokens[0]}`;
-
-    let idx1 = -1;
-    while ((idx1 = textClean.indexOf(short1, idx1 + 1)) !== -1) {
-      positions.push(idx1);
-    }
-    let idx2 = -1;
-    while ((idx2 = textClean.indexOf(short2, idx2 + 1)) !== -1) {
-      positions.push(idx2);
-    }
-  }
-
-  if (positions.length > 0) return positions;
-
-  // 4. Coincidencia si las palabras clave principales del colaborador aparecen en el texto
-  if (tokens.length >= 2) {
-    const firstTok = tokens[0];
-    const lastTok = tokens[tokens.length - 1];
-
-    let posFirst = textClean.indexOf(firstTok);
-    let posLast = textClean.indexOf(lastTok);
-
-    if (posFirst !== -1 && posLast !== -1) {
-      const minPos = Math.min(posFirst, posLast);
-      positions.push(minPos);
-    }
-  }
-
-  return positions;
+  // 3. Primer nombre + último apellido, en cualquier orden (ej. "YEPES PAULA" vs "PAULA YEPES")
+  const first = tokens[0];
+  const last = tokens[tokens.length - 1];
+  return [
+    ...findWholeWordPositions(textClean, `${first} ${last}`),
+    ...findWholeWordPositions(textClean, `${last} ${first}`),
+  ].sort((a, b) => a - b);
 };
 
 /**
@@ -404,6 +400,33 @@ export const parseAllTimestampLogsFromText = (
 /**
  * Parsea reportes de asistencia PDF en formato de páginas independientes o documentos consolidados.
  */
+/**
+ * Une dos marcaciones del mismo día: la entrada más temprana y la salida más tardía.
+ * La salida se compara en línea de tiempo continua respecto a su propia entrada, para que
+ * una salida después de medianoche (p. ej. 01:00) gane sobre una de 23:00.
+ */
+export const fusionarMarcacionDia = (existing: PosTimestampLog, log: PosTimestampLog): PosTimestampLog => {
+  const minEntry = parseTimeToMinutes(log.timeEntry) ?? 1440;
+  const existEntry = parseTimeToMinutes(existing.timeEntry) ?? 1440;
+  const finalEntry = minEntry < existEntry ? log.timeEntry : existing.timeEntry;
+
+  const salida = (m: PosTimestampLog) => {
+    const s = parseTimeToMinutes(m.timeExit);
+    if (s === null) return -1;
+    const e = parseTimeToMinutes(m.timeEntry);
+    return e === null ? s : salidaContinuaMin(e, s);
+  };
+  const finalExit = salida(log) > salida(existing) ? log.timeExit : existing.timeExit;
+
+  return {
+    ...existing,
+    timeEntry: finalEntry,
+    timeExit: finalExit,
+    isFestivo: existing.isFestivo || log.isFestivo,
+    isDominical: existing.isDominical || log.isDominical
+  };
+};
+
 export const parsePosPdfPages = (
   pageTexts: string[],
   teamMembers: any[]
@@ -420,21 +443,7 @@ export const parsePosPdfPages = (
     if (!existing) {
       result[memberName][log.dateIso] = log;
     } else {
-      const minEntry = parseTimeToMinutes(log.timeEntry) ?? 1440;
-      const existEntry = parseTimeToMinutes(existing.timeEntry) ?? 1440;
-      const finalEntry = minEntry < existEntry ? log.timeEntry : existing.timeEntry;
-
-      const maxExit = parseTimeToMinutes(log.timeExit) ?? 0;
-      const existExit = parseTimeToMinutes(existing.timeExit) ?? 0;
-      const finalExit = maxExit > existExit ? log.timeExit : existing.timeExit;
-
-      result[memberName][log.dateIso] = {
-        ...existing,
-        timeEntry: finalEntry,
-        timeExit: finalExit,
-        isFestivo: existing.isFestivo || log.isFestivo,
-        isDominical: existing.isDominical || log.isDominical
-      };
+      result[memberName][log.dateIso] = fusionarMarcacionDia(existing, log);
     }
   };
 
@@ -461,12 +470,14 @@ export const parsePosPdfPages = (
   });
 
   // Ordenar los encabezados de colaboradores por posición de aparición
-  allHeaders.sort((a, b) => a.index - b.index);
+  // (a igual posición gana el nombre más largo: "Ana Pérez Gómez" sobre "Ana Pérez")
+  allHeaders.sort((a, b) => a.index - b.index || b.memberName.length - a.memberName.length);
 
   // Filtrar duplicados muy cercanos (< 40 caracteres)
   const filteredHeaders: { memberName: string; index: number }[] = [];
   allHeaders.forEach(item => {
     const last = filteredHeaders[filteredHeaders.length - 1];
+    if (last && last.index === item.index) return; // mismo encabezado, ya ganó el nombre más largo
     if (!last || last.memberName !== item.memberName || (item.index - last.index) > 40) {
       filteredHeaders.push(item);
     }
@@ -477,28 +488,19 @@ export const parsePosPdfPages = (
 
   if (allLogsWithPos.length > 0) {
     if (filteredHeaders.length > 0) {
-      // Asignar cada registro de tiempo al colaborador cuyo encabezado antecede a la marca
+      // Asignar cada registro de tiempo al colaborador cuyo encabezado antecede a la marca.
+      // Las marcas que no tienen un encabezado identificado antes NO se asignan a nadie.
       allLogsWithPos.forEach(({ log, index: logIdx }) => {
-        let assignedName = filteredHeaders[0].memberName;
-
         for (let i = filteredHeaders.length - 1; i >= 0; i--) {
           if (filteredHeaders[i].index <= logIdx + 80) {
-            assignedName = filteredHeaders[i].memberName;
-            break;
+            addLogToMember(filteredHeaders[i].memberName, log);
+            return;
           }
         }
-
-        addLogToMember(assignedName, log);
       });
-    } else {
-      // Si no se detectaron encabezados explícitos, usar asignación por primer colaborador disponible
-      const defaultName = typeof teamMembers[0] === "string" ? teamMembers[0] : teamMembers[0]?.nombre;
-      if (defaultName) {
-        allLogsWithPos.forEach(({ log }) => {
-          addLogToMember(defaultName, log);
-        });
-      }
     }
+    // Sin encabezados identificados no se asigna ninguna marca: es preferible reportar
+    // "sin marcaciones" que cargarle a un colaborador las horas de otro.
   }
 
   return result;
@@ -528,7 +530,10 @@ export const normalizeText = (str: string): string => {
 };
 
 /**
- * Busca el empleado registrado en teamMembers que mejor coincida con el nombre parseado desde el PDF del POS.
+ * Busca el empleado registrado en teamMembers que corresponde al nombre parseado desde el reporte del POS.
+ *
+ * Exige cédula exacta o que coincidan al menos 2 palabras del nombre (nombre + apellido).
+ * Si dos colaboradores empatan, no se asigna (ambiguo) para no cruzar marcaciones.
  */
 export const matchEmployeeName = (pdfCandidateName: string, teamMembers: any[]): any | null => {
   if (!pdfCandidateName || !teamMembers || teamMembers.length === 0) return null;
@@ -536,46 +541,45 @@ export const matchEmployeeName = (pdfCandidateName: string, teamMembers: any[]):
   const candidateClean = normalizeText(pdfCandidateName);
   if (!candidateClean) return null;
 
-  const candidateTokens = candidateClean.split(" ").filter(t => t.length >= 2);
+  // Coincidencia por documento de identidad (Cédula), como número completo
+  for (const member of teamMembers) {
+    const cleanCedula = cleanCedulaOf(member);
+    if (cleanCedula.length >= 5 && findWholeWordPositions(candidateClean, cleanCedula).length > 0) {
+      return member;
+    }
+  }
+
+  const candidateTokens = new Set(nameTokens(candidateClean));
+  if (candidateTokens.size < 2) return null;
 
   let bestMatch: any = null;
   let maxScore = 0;
+  let empate = false;
 
   for (const member of teamMembers) {
     const memberName = typeof member === "string" ? member : member?.nombre;
     if (!memberName) continue;
 
-    // Coincidencia por documento de identidad (Cédula)
-    if (typeof member === "object" && member?.cedula) {
-      const cleanCedula = member.cedula.toString().trim();
-      if (cleanCedula.length >= 5 && candidateClean.includes(cleanCedula)) {
-        return member;
-      }
-    }
-
     const memberClean = normalizeText(memberName);
-    const memberTokens = memberClean.split(" ").filter(t => t.length >= 2);
+    const memberTokens = nameTokens(memberClean);
+    if (memberTokens.length < 2) continue;
 
-    // Coincidencia exacta o contención total
-    if (candidateClean === memberClean || candidateClean.includes(memberClean) || memberClean.includes(candidateClean)) {
-      return member;
-    }
+    // Nombre completo idéntico: coincidencia directa
+    if (memberClean === candidateClean) return member;
 
-    // Coincidencia por tokens
-    let matches = 0;
-    for (const mTok of memberTokens) {
-      if (candidateTokens.some(cTok => cTok === mTok || (mTok.length >= 4 && cTok.includes(mTok)) || (cTok.length >= 4 && mTok.includes(cTok)))) {
-        matches += 1;
-      }
-    }
+    const matches = memberTokens.filter(t => candidateTokens.has(t)).length;
+    if (matches < 2) continue;
 
-    if (matches > maxScore && matches >= 1) {
+    if (matches > maxScore) {
       maxScore = matches;
       bestMatch = member;
+      empate = false;
+    } else if (matches === maxScore) {
+      empate = true;
     }
   }
 
-  return bestMatch;
+  return empate ? null : bestMatch;
 };
 
 /**
@@ -625,7 +629,10 @@ export interface ProcessedDayRecord {
   salidaTempranaMinutos: number; // Salida antes del cierre programado
   tiempoAdicionalSalidaMinutos: number; // Salida después del cierre programado
   horasTrabajadasEfectivas: number;
-  recargoNocturnoMinutos: number; // Minutos trabajados entre 21:00 (9pm) y 06:00 (6am)
+  recargoNocturnoMinutos: number; // Minutos ordinarios entre 19:00 (7pm) y 06:00 (6am); no incluye extra nocturna
+  extraDiurnaMinutos: number; // Hora extra diurna (×1,25) tras reponer faltantes del mismo día
+  extraNocturnaMinutos: number; // Hora extra nocturna (×1,75), desde 19:00
+  faltantesNoCompensadosMinutos: number; // Tardanza + salida anticipada no repuesta; se descuenta a valor ordinario
   observacion: string;
 }
 
@@ -647,10 +654,17 @@ export const evaluateAttendanceDay = (
 ): ProcessedDayRecord => {
   const holidayCheck = checkColombianHolidayOrSunday(fechaStr);
 
-  const actualEntryMins = parseTimeToMinutes(actualEntryStr) ?? parseTimeToMinutes(scheduledEntryStr) ?? 420;
-  const actualExitMins = parseTimeToMinutes(actualExitStr) ?? parseTimeToMinutes(scheduledExitStr) ?? 900;
+  const actualEntryRaw = parseTimeToMinutes(actualEntryStr) ?? parseTimeToMinutes(scheduledEntryStr) ?? 420;
+  const actualExitRaw = parseTimeToMinutes(actualExitStr) ?? parseTimeToMinutes(scheduledExitStr) ?? 900;
   const schedEntryMins = parseTimeToMinutes(scheduledEntryStr) ?? 420;
-  const schedExitMins = parseTimeToMinutes(scheduledExitStr) ?? 900;
+  // Turnos que cruzan medianoche: se trabaja en una línea de tiempo continua (+1440 min).
+  const schedExitMins = salidaContinuaMin(schedEntryMins, parseTimeToMinutes(scheduledExitStr) ?? 900);
+  // En un turno nocturno programado, una entrada de madrugada es llegada tarde, no anticipada.
+  const actualEntryMins = schedExitMins >= 1440 && actualEntryRaw + 720 < schedEntryMins
+    ? actualEntryRaw + 1440
+    : actualEntryRaw;
+  let actualExitMins = actualExitRaw;
+  while (actualExitMins < actualEntryMins) actualExitMins += 1440;
 
   // REGLA 1: Entrada antes del horario programado -> No cuenta.
   let llegadaAntesIgnorada = 0;
@@ -683,17 +697,19 @@ export const evaluateAttendanceDay = (
   const rawWorkMins = Math.max(0, actualExitMins - effectiveWorkStartMins - (lunchMinutes || 0));
   const horasTrabajadasEfectivas = Math.round((rawWorkMins / 60) * 10) / 10;
 
-  // Recargo nocturno (franja de 9:00 PM / 21:00 a 6:00 AM)
-  let recargoNocturnoMinutos = 0;
-  const nightStartMins = 21 * 60; // 9:00 PM = 1260 mins
-  if (actualExitMins > nightStartMins) {
-    recargoNocturnoMinutos = Math.max(0, actualExitMins - nightStartMins);
-  }
+  // Extra diurna / nocturna, faltantes no repuestos y recargo nocturno ordinario (7:00 p. m. – 6:00 a. m.)
+  const tiempo = clasificarTiempoDia({
+    inicioEfectivoMin: effectiveWorkStartMins,
+    salidaProgramadaMin: schedExitMins,
+    salidaRealMin: actualExitMins,
+    faltantesMin: tardanzaEntradaMinutos + salidaTempranaMinutos,
+  });
+  const recargoNocturnoMinutos = tiempo.recargoNocturnoMin;
 
   // Generar observación
   let obs = "";
   if (holidayCheck.isHolidayOrSunday) {
-    obs = `Jornada Dominical/Festiva (+90% Recargo). ${holidayCheck.reason}`;
+    obs = `Jornada Dominical/Festiva (${etiquetaRecargoDominical(fechaStr)} Recargo). ${holidayCheck.reason}`;
   } else if (tardanzaEntradaMinutos > 0) {
     obs = `Llegada tarde de ${tardanzaEntradaMinutos} min.`;
   } else if (salidaTempranaMinutos > 0) {
@@ -723,6 +739,9 @@ export const evaluateAttendanceDay = (
     tiempoAdicionalSalidaMinutos,
     horasTrabajadasEfectivas,
     recargoNocturnoMinutos,
+    extraDiurnaMinutos: tiempo.extraDiurnaMin,
+    extraNocturnaMinutos: tiempo.extraNocturnaMin,
+    faltantesNoCompensadosMinutos: tiempo.faltantesMin,
     observacion: obs
   };
 };
@@ -751,7 +770,11 @@ export const parseExcelDateTimeStr = (valStr: string): { dateIso: string; timeSt
 
   let dateIso = "";
   if (datePart) {
-    dateIso = parsePosDateToIsoWithFormat(datePart, "DD/MM/YYYY");
+    // Celdas con fecha real de Excel llegan como ISO (YYYY-MM-DD) por el dateNF de XLSX.read
+    const iso = datePart.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    dateIso = iso
+      ? `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`
+      : parsePosDateToIsoWithFormat(datePart, "DD/MM/YYYY");
   }
 
   let timeStr = "";
@@ -797,8 +820,8 @@ export const matchMemberFromExcel = (
 
   if (mainFirstName && mainFirstSurname) {
     for (const member of teamMembers) {
-      const mName = normalizeText(member.nombre || member.nombre_dashboard || "");
-      if (mName.includes(mainFirstName) && mName.includes(mainFirstSurname)) {
+      const mTokens = nameTokens(normalizeText(member.nombre || member.nombre_dashboard || ""));
+      if (mTokens.includes(mainFirstName) && mTokens.includes(mainFirstSurname)) {
         return member;
       }
     }
@@ -825,10 +848,11 @@ export const matchMemberFromExcel = (
  * - Ignora las filas donde la hora de inicio (Columna N / índice 13) esté vacía.
  * - Mapa de columnas: Col A = Cédula, Col D = Nombres, Col H = Apellidos, Col N = Entrada, Col O = Salida.
  */
-export const parsePosExcelFile = (
+export const parsePosExcelFile = async (
   arrayBuffer: ArrayBuffer,
   teamMembers: any[]
-): Record<string, Record<string, PosTimestampLog>> => {
+): Promise<Record<string, Record<string, PosTimestampLog>>> => {
+  const XLSX = await loadXLSX();
   const result: Record<string, Record<string, PosTimestampLog>> = {};
   if (!arrayBuffer || !teamMembers) return result;
 
@@ -846,21 +870,7 @@ export const parsePosExcelFile = (
       if (!existing) {
         result[memberName][log.dateIso] = log;
       } else {
-        const minEntry = parseTimeToMinutes(log.timeEntry) ?? 1440;
-        const existEntry = parseTimeToMinutes(existing.timeEntry) ?? 1440;
-        const finalEntry = minEntry < existEntry ? log.timeEntry : existing.timeEntry;
-
-        const maxExit = parseTimeToMinutes(log.timeExit) ?? 0;
-        const existExit = parseTimeToMinutes(existing.timeExit) ?? 0;
-        const finalExit = maxExit > existExit ? log.timeExit : existing.timeExit;
-
-        result[memberName][log.dateIso] = {
-          ...existing,
-          timeEntry: finalEntry,
-          timeExit: finalExit,
-          isFestivo: existing.isFestivo || log.isFestivo,
-          isDominical: existing.isDominical || log.isDominical
-        };
+        result[memberName][log.dateIso] = fusionarMarcacionDia(existing, log);
       }
     };
 
@@ -938,9 +948,9 @@ export const generatePayrollTirillaJson = (
     const entry = r.horaIngresoMarcada || r.horaIngreso;
     const exit = r.horaSalidaMarcada || r.horaSalida;
     if (entry && entry !== "--:--" && exit && exit !== "--:--") {
-      const eMins = parseTimeToMinutes(entry) || 0;
-      const sMins = parseTimeToMinutes(exit) || 0;
-      if (sMins > eMins) totalMinutos += (sMins - eMins);
+      const eMins = parseTimeToMinutes(entry);
+      const sMins = parseTimeToMinutes(exit);
+      if (eMins !== null && sMins !== null) totalMinutos += duracionTurnoMin(eMins, sMins);
     }
   });
 

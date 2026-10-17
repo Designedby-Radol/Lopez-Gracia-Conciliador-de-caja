@@ -27,20 +27,30 @@ import {
   EyeOff,
   Package,
   ClipboardCheck,
-  Pencil
+  Pencil,
+  Home,
+  TrendingUp,
+  Store,
+  LogOut,
+  MoreHorizontal,
+  X
 } from "lucide-react";
-import * as pdfjsLib from "pdfjs-dist";
-// @ts-ignore
-import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { dbAdapter } from "../db/dbAdapter";
-import { supabase } from "../db/supabaseConfig";
+import { api } from "../lib/api";
 import { CierreCaja } from "../types";
 import Logo from "./Logo";
 import InventoryClosure from "./InventoryClosure";
 import OperationalChecklist from "./OperationalChecklist";
+import { todayBogota } from "../lib/dates";
+import { esLiderOperador, esCargoPasteleria } from "../lib/metricasEquipo";
+import type { SeccionColaborador } from "./colaborador/types";
+import MiDia from "./colaborador/MiDia";
+import MiDesempeno from "./colaborador/MiDesempeno";
+import PanelPunto from "./colaborador/PanelPunto";
+import MisDesprendibles from "./colaborador/MisDesprendibles";
+import Avisos from "./colaborador/Avisos";
 
 // Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 interface CollaboratorInflowProps {
   onLogout: () => void;
@@ -51,14 +61,7 @@ interface CollaboratorInflowProps {
 
 export default function CollaboratorInflow({ onLogout, username, role = "colaborador", local = "Chapinero" }: CollaboratorInflowProps) {
   // Configurar la fecha predeterminada como el día actual en formato YYYY-MM-DD (hora de Bogotá)
-  const getTodayString = () => {
-    const d = new Date();
-    // Ajuste de zona horaria de Bogotá (UTC-5) si es necesario
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
+  const getTodayString = () => todayBogota();
 
   const [fecha, setFecha] = useState(getTodayString());
   const [colaboradorNombre, setColaboradorNombre] = useState(username || "");
@@ -361,7 +364,30 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
     }
   }, [isLeaderRole, username, localRegisteredUsers.leaders]);
 
-  const [activeTab, setActiveTab] = useState<"register" | "inventory" | "checklist" | "password">("register");
+  const [activeTab, setActiveTab] = useState<SeccionColaborador>("inicio");
+  const [masAbierto, setMasAbierto] = useState(false);
+  const esLiderOp = esLiderOperador(role);
+  const esPasteleria = esCargoPasteleria(role);
+
+  // Pastelería no maneja caja: su día empieza por checklist e inventario.
+  const navItems = useMemo(() => {
+    const item = (id: SeccionColaborador, label: string, icon: React.ReactNode) => ({ id, label, icon });
+    const inicio = item("inicio", "Inicio", <Home className="w-4 h-4" />);
+    const caja = item("register", "Cierre de caja", <PlusCircle className="w-4 h-4" />);
+    const checklist = item("checklist", "Checklist", <ClipboardCheck className="w-4 h-4" />);
+    const inventario = item("inventory", "Inventario", <Package className="w-4 h-4" />);
+    const desempeno = item("desempeno", "Mi desempeño", <TrendingUp className="w-4 h-4" />);
+    const punto = item("punto", "Punto", <Store className="w-4 h-4" />);
+    const desprendibles = item("desprendibles", "Desprendibles", <FileText className="w-4 h-4" />);
+    const seguridad = item("password", "Seguridad", <Lock className="w-4 h-4" />);
+    return esPasteleria
+      ? [inicio, checklist, inventario, desempeno, caja, desprendibles, seguridad]
+      : [inicio, caja, checklist, desempeno, ...(esLiderOp ? [punto] : []), inventario, desprendibles, seguridad];
+  }, [esPasteleria, esLiderOp]);
+  // Los paneles de métricas usan el ancho de pantallas grandes; los formularios conservan su ancho de lectura.
+  const vistaAncha = activeTab === "inicio" || activeTab === "desempeno" || activeTab === "punto";
+  const navPrincipal = navItems.slice(0, 4);
+  const navMas = navItems.slice(4);
   const [cajaSubTab, setCajaSubTab] = useState<"form" | "history">("form");
   const [history, setHistory] = useState<CierreCaja[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -428,8 +454,8 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
       return;
     }
 
-    if (newPassword.length < 3) {
-      setPasswordError("La nueva contraseña debe tener al menos 3 caracteres.");
+    if (newPassword.length < 6) {
+      setPasswordError("La nueva contraseña debe tener al menos 6 caracteres.");
       return;
     }
 
@@ -441,15 +467,14 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
     setIsUpdatingPassword(true);
 
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) {
-        setPasswordError("Error al actualizar la contraseña: " + error.message);
-      } else {
-        setPasswordSuccess("¡Contraseña actualizada con éxito en Supabase Auth! Utiliza tu nueva contraseña en tu próximo inicio de sesión.");
-        setCurrentPassword("");
-        setNewPassword("");
-        setConfirmPassword("");
-      }
+      await api("/api/auth/change-password", {
+        method: "POST",
+        json: { currentPassword, newPassword },
+      });
+      setPasswordSuccess("¡Contraseña actualizada! Utiliza tu nueva contraseña en tu próximo inicio de sesión.");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
     } catch (err: any) {
       setPasswordError(err?.message || "Error al actualizar contraseña");
     } finally {
@@ -569,13 +594,8 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
         // Guardar nuevo cierre
         const result = await dbAdapter.saveCierre({
           ...payload,
+          // Los valores POS los registra Gerencia al auditar.
           estado: "Pendiente por Cuadrar" as const,
-          efectivoPOS: 0,
-          tarjetasPOS: 0,
-          justoPOS: 0,
-          rappiPOS: 0,
-          transferenciasPOS: 0,
-          posFileName: "",
         }, local);
         setSuccessData(result);
       }
@@ -592,7 +612,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
       setNovedades("");
     } catch (error) {
       console.error("Error al guardar/actualizar cierre de caja:", error);
-      alert("Hubo un error al procesar el cierre. Intente nuevamente.");
+      alert(`No se pudo guardar el cierre: ${(error as Error)?.message || "intente nuevamente."}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -617,108 +637,83 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
     }
   };
 
+  const go = (s: SeccionColaborador) => {
+    if (s === "punto" && !esLiderOp) return;
+    if (s === "register") setSuccessData(null);
+    setActiveTab(s);
+    setMasAbierto(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-[#1C2E24] flex flex-col selection:bg-[#1E3E30]/10 relative">
-      {/* Barra de Navegación del Colaborador */}
-      <header className="bg-white border-b border-slate-200/80 py-3.5 px-6 flex items-center justify-between sticky top-0 z-30 shadow-[0_1px_3px_0_rgba(0,0,0,0.02)]">
-        <div className="flex items-center space-x-3.5">
-          <div className="bg-[#1E3E30]/5 p-2 rounded-xl border border-[#1E3E30]/10 flex items-center justify-center">
-            <Logo size="sm" className="text-[#1E3E30]" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-sm font-extrabold tracking-tight text-slate-900">
-                López & Gracia
-              </h1>
-              <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200/50">
-                Punto {local}
-              </span>
+    <div className="min-h-dvh bg-[#F8F9FA] text-[#1C2E24] flex flex-col selection:bg-[#1E3E30]/15 relative">
+      {/* Cabecera */}
+      <header className="bg-white/95 backdrop-blur-sm border-b border-slate-200/80 px-4 sm:px-6 lg:px-8 sticky top-0 z-30 pt-[env(safe-area-inset-top)]">
+        <div className="max-w-7xl mx-auto h-16 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="bg-[#1E3E30]/5 p-2 rounded-xl border border-[#1E3E30]/10 flex items-center justify-center shrink-0">
+              <Logo size="sm" className="text-[#1E3E30]" />
             </div>
-            <p className="text-xs text-slate-500 font-medium mt-0.5">
-              Portal Operativo & Ingreso Diario
-            </p>
+            <div className="min-w-0">
+              <p className="text-sm font-extrabold tracking-tight text-slate-900 truncate">López & Gracia</p>
+              <p className="text-xs text-slate-500 font-medium truncate">Punto {local}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="hidden sm:flex flex-col text-right pr-1">
+              <span className="text-xs text-slate-900 font-bold">{username}</span>
+              <span className="text-[11px] font-semibold text-slate-500">{role}</span>
+            </div>
+            <Avisos onNavigate={go} />
+            <button
+              onClick={onLogout}
+              aria-label="Cerrar sesión"
+              className="h-10 px-3 inline-flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1E3E30]"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Cerrar sesión</span>
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center space-x-3">
-          <div className="hidden sm:flex flex-col text-right pr-2">
-            <span className="text-xs text-slate-900 font-bold">{username}</span>
-            <span className="text-[11px] font-semibold text-slate-400">Rol: {role}</span>
-          </div>
-          <button
-            onClick={onLogout}
-            className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 shadow-xs hover:border-slate-300 transition-all cursor-pointer"
-          >
-            Cerrar Sesión
-          </button>
-        </div>
+        {/* Pestañas (escritorio y tablet) */}
+        <nav aria-label="Secciones" className="hidden lg:block max-w-7xl mx-auto -mb-px">
+          <ul className="flex gap-1 overflow-x-auto">
+            {navItems.map((it) => {
+              const activo = activeTab === it.id;
+              return (
+                <li key={it.id}>
+                  <button
+                    type="button"
+                    onClick={() => go(it.id)}
+                    aria-current={activo ? "page" : undefined}
+                    className={`flex items-center gap-2 px-3.5 py-3 text-xs font-bold border-b-2 whitespace-nowrap cursor-pointer transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#1E3E30] ${
+                      activo ? "border-[#1E3E30] text-[#1E3E30]" : "border-transparent text-slate-500 hover:text-slate-900"
+                    }`}
+                  >
+                    {it.icon}
+                    {it.label}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
       </header>
 
       {/* Contenedor Principal */}
-      <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 md:p-8 flex flex-col justify-start relative z-10">
-        
-        {/* Selector de Pestañas Principal con Alto Contraste */}
-        <div className="flex flex-wrap bg-[#1E3E30] p-1.5 rounded-2xl shadow-md border border-[#163025] mb-6 gap-1.5">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab("register");
-              setSuccessData(null);
-            }}
-            className={`flex-1 min-w-[130px] py-2.5 px-3.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
-              activeTab === "register"
-                ? "bg-white text-[#1E3E30] shadow-sm font-extrabold"
-                : "text-emerald-100/90 hover:text-white hover:bg-white/15"
-            }`}
-          >
-            <PlusCircle className={`w-4 h-4 ${activeTab === "register" ? "text-[#1E3E30]" : "text-emerald-300"}`} />
-            <span>Cierre de Caja</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab("inventory");
-            }}
-            className={`flex-1 min-w-[130px] py-2.5 px-3.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
-              activeTab === "inventory"
-                ? "bg-white text-[#1E3E30] shadow-sm font-extrabold"
-                : "text-emerald-100/90 hover:text-white hover:bg-white/15"
-            }`}
-          >
-            <Package className={`w-4 h-4 ${activeTab === "inventory" ? "text-amber-600" : "text-amber-300"}`} />
-            <span>Cierre Inventario</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab("checklist");
-            }}
-            className={`flex-1 min-w-[130px] py-2.5 px-3.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
-              activeTab === "checklist"
-                ? "bg-white text-[#1E3E30] shadow-sm font-extrabold"
-                : "text-emerald-100/90 hover:text-white hover:bg-white/15"
-            }`}
-          >
-            <ClipboardCheck className={`w-4 h-4 ${activeTab === "checklist" ? "text-emerald-700" : "text-emerald-300"}`} />
-            <span>Checklist Operativo</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab("password");
-            }}
-            className={`flex-1 min-w-[130px] py-2.5 px-3.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-2 ${
-              activeTab === "password"
-                ? "bg-white text-[#1E3E30] shadow-sm font-extrabold"
-                : "text-emerald-100/90 hover:text-white hover:bg-white/15"
-            }`}
-          >
-            <Lock className={`w-4 h-4 ${activeTab === "password" ? "text-slate-700" : "text-emerald-300"}`} />
-            <span>Seguridad</span>
-          </button>
-        </div>
+      <main className={`flex-1 ${vistaAncha ? "max-w-7xl" : "max-w-5xl"} w-full mx-auto px-4 pt-5 pb-28 sm:px-6 lg:px-8 md:pt-8 lg:pb-12 flex flex-col justify-start relative z-10`}>
 
-        {activeTab === "inventory" ? (
+        {activeTab === "inicio" ? (
+          <MiDia onNavigate={go} />
+        ) : activeTab === "desempeno" ? (
+          <MiDesempeno />
+        ) : activeTab === "punto" && esLiderOp ? (
+          <PanelPunto local={local} />
+        ) : activeTab === "desprendibles" ? (
+          <MisDesprendibles />
+        ) : activeTab === "inventory" ? (
           <InventoryClosure
             username={username}
             userRole={role}
@@ -1007,7 +1002,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                               </button>
                             ) : (
                               <span
-                                className="px-2.5 py-1 bg-slate-100 text-slate-500 font-semibold text-[10px] rounded-lg border border-slate-200 flex items-center space-x-1 cursor-not-allowed opacity-80"
+                                className="px-2.5 py-1 bg-slate-100 text-slate-500 font-semibold text-[11px] rounded-lg border border-slate-200 flex items-center space-x-1 cursor-not-allowed opacity-80"
                                 title="Este cierre ya fue auditado y conciliado ('Cuadrado'), no es editable"
                               >
                                 <Lock className="w-3 h-3 text-slate-400" />
@@ -1018,7 +1013,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
 
                           <div className="flex items-center justify-between w-full sm:w-auto sm:space-x-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
                             <div className="text-right">
-                              <span className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider leading-none mb-1">Total Reportado</span>
+                              <span className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider leading-none mb-1">Total Reportado</span>
                               <span className="font-extrabold text-sm text-slate-900 leading-none font-numeric">{formatCOP(String(totalCierre))}</span>
                             </div>
                             <div className="text-slate-400 p-1 rounded-lg hover:bg-slate-100">
@@ -1071,7 +1066,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                                   <h4 className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2 mb-3 flex justify-between items-center">
                                     <span>Auditoría de Ventas</span>
                                     {c.estado === "Cuadrado" && (
-                                      <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded-md">Aprobado</span>
+                                      <span className="text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded-md">Aprobado</span>
                                     )}
                                   </h4>
 
@@ -1082,7 +1077,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                                         <span className="text-slate-500">Efectivo POS / Dif:</span>
                                         <div className="text-right">
                                           <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.efectivoPOS))}</span>
-                                          <span className={`text-[10px] font-bold font-numeric ${
+                                          <span className={`text-[11px] font-bold font-numeric ${
                                             (c.difEfectivo || 0) === 0 ? "text-emerald-600" : (c.difEfectivo || 0) < 0 ? "text-rose-600" : "text-blue-600"
                                           }`}>
                                             {(c.difEfectivo || 0) === 0 ? "Sin dif." : `${(c.difEfectivo || 0) > 0 ? "+" : ""}${formatCOP(String(c.difEfectivo))}`}
@@ -1094,7 +1089,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                                         <span className="text-slate-500">Datáfono POS / Dif:</span>
                                         <div className="text-right">
                                           <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.tarjetasPOS))}</span>
-                                          <span className={`text-[10px] font-bold font-numeric ${
+                                          <span className={`text-[11px] font-bold font-numeric ${
                                             (c.difTarjetas || 0) === 0 ? "text-emerald-600" : (c.difTarjetas || 0) < 0 ? "text-rose-600" : "text-blue-600"
                                           }`}>
                                             {(c.difTarjetas || 0) === 0 ? "Sin dif." : `${(c.difTarjetas || 0) > 0 ? "+" : ""}${formatCOP(String(c.difTarjetas))}`}
@@ -1106,7 +1101,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                                         <span className="text-slate-500">Justo POS / Dif:</span>
                                         <div className="text-right">
                                           <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.justoPOS))}</span>
-                                          <span className={`text-[10px] font-bold font-numeric ${
+                                          <span className={`text-[11px] font-bold font-numeric ${
                                             (c.difJusto || 0) === 0 ? "text-emerald-600" : (c.difJusto || 0) < 0 ? "text-rose-600" : "text-blue-600"
                                           }`}>
                                             {(c.difJusto || 0) === 0 ? "Sin dif." : `${(c.difJusto || 0) > 0 ? "+" : ""}${formatCOP(String(c.difJusto))}`}
@@ -1118,7 +1113,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                                         <span className="text-slate-500">Rappi POS / Dif:</span>
                                         <div className="text-right">
                                           <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.rappiPOS))}</span>
-                                          <span className={`text-[10px] font-bold font-numeric ${
+                                          <span className={`text-[11px] font-bold font-numeric ${
                                             (c.difRappi || 0) === 0 ? "text-emerald-600" : (c.difRappi || 0) < 0 ? "text-rose-600" : "text-blue-600"
                                           }`}>
                                             {(c.difRappi || 0) === 0 ? "Sin dif." : `${(c.difRappi || 0) > 0 ? "+" : ""}${formatCOP(String(c.difRappi))}`}
@@ -1130,7 +1125,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                                         <span className="text-slate-500">Transf. POS / Dif:</span>
                                         <div className="text-right">
                                           <span className="font-bold text-slate-900 block font-numeric">{formatCOP(String(c.transferenciasPOS))}</span>
-                                          <span className={`text-[10px] font-bold font-numeric ${
+                                          <span className={`text-[11px] font-bold font-numeric ${
                                             (c.difTransferencias || 0) === 0 ? "text-emerald-600" : (c.difTransferencias || 0) < 0 ? "text-rose-600" : "text-blue-600"
                                           }`}>
                                             {(c.difTransferencias || 0) === 0 ? "Sin dif." : `${(c.difTransferencias || 0) > 0 ? "+" : ""}${formatCOP(String(c.difTransferencias))}`}
@@ -1414,7 +1409,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                 <div className="col-span-1">
                   <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
                     <span>Responsable del Cierre</span>
-                    <span className="text-[10px] text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-full">Obligatorio</span>
+                    <span className="text-[11px] text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-full">Obligatorio</span>
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 pointer-events-none">
@@ -1448,7 +1443,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
                         <span>Líder de Punto a Cargo</span>
-                        <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full">Obligatorio</span>
+                        <span className="text-[11px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full">Obligatorio</span>
                       </label>
                       <div className="relative">
                         <select
@@ -1570,7 +1565,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
                       <span>Cierre Justo App</span>
-                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
+                      <span className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
                     </label>
                     <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg font-numeric">{formatCOP(justo)}</span>
                   </div>
@@ -1596,7 +1591,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
                       <span>Cierre Rappi App</span>
-                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
+                      <span className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
                     </label>
                     <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg font-numeric">{formatCOP(rappi)}</span>
                   </div>
@@ -1622,7 +1617,7 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
                       <span>Transferencias (POS)</span>
-                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
+                      <span className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">POS</span>
                     </label>
                     <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg font-numeric">{formatCOP(transferencias)}</span>
                   </div>
@@ -1709,6 +1704,79 @@ export default function CollaboratorInflow({ onLogout, username, role = "colabor
       </div>
     )}
   </main>
+
+      {/* Navegación inferior (celular) */}
+      <nav
+        aria-label="Secciones"
+        className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-sm border-t border-slate-200 pb-[env(safe-area-inset-bottom)]"
+      >
+        <ul className="grid grid-cols-5">
+          {navPrincipal.map((it) => {
+            const activo = activeTab === it.id;
+            return (
+              <li key={it.id}>
+                <button
+                  type="button"
+                  onClick={() => go(it.id)}
+                  aria-current={activo ? "page" : undefined}
+                  className={`w-full h-16 flex flex-col items-center justify-center gap-1 text-[11px] font-bold cursor-pointer select-none [-webkit-tap-highlight-color:transparent] ${
+                    activo ? "text-[#1E3E30]" : "text-slate-500"
+                  }`}
+                >
+                  <span className={`px-3 py-1 rounded-full transition-colors ${activo ? "bg-[#E8F3EE]" : ""}`}>{it.icon}</span>
+                  <span className="truncate max-w-full px-1">{it.id === "register" ? "Caja" : it.id === "desempeno" ? "Desempeño" : it.label}</span>
+                </button>
+              </li>
+            );
+          })}
+          <li>
+            <button
+              type="button"
+              onClick={() => setMasAbierto(true)}
+              aria-haspopup="dialog"
+              aria-expanded={masAbierto}
+              className={`w-full h-16 flex flex-col items-center justify-center gap-1 text-[11px] font-bold cursor-pointer select-none [-webkit-tap-highlight-color:transparent] ${
+                navMas.some((it) => it.id === activeTab) ? "text-[#1E3E30]" : "text-slate-500"
+              }`}
+            >
+              <span className={`px-3 py-1 rounded-full ${navMas.some((it) => it.id === activeTab) ? "bg-[#E8F3EE]" : ""}`}>
+                <MoreHorizontal className="w-4 h-4" />
+              </span>
+              <span>Más</span>
+            </button>
+          </li>
+        </ul>
+      </nav>
+
+      {masAbierto && (
+        <div className="lg:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Más secciones">
+          <button type="button" aria-label="Cerrar" onClick={() => setMasAbierto(false)} className="absolute inset-0 bg-slate-900/30 cursor-default" />
+          <div className="absolute bottom-0 inset-x-0 bg-white rounded-t-3xl pt-2 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-12px_32px_-12px_rgba(28,46,36,0.3)] animate-[subir_220ms_cubic-bezier(0.16,1,0.3,1)]">
+            <div className="flex items-center justify-between px-5 py-3">
+              <p className="text-sm font-extrabold text-slate-900">Más secciones</p>
+              <button type="button" onClick={() => setMasAbierto(false)} aria-label="Cerrar" className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <ul className="px-3">
+              {navMas.map((it) => (
+                <li key={it.id}>
+                  <button
+                    type="button"
+                    onClick={() => go(it.id)}
+                    className={`w-full flex items-center gap-3 px-3 py-3.5 rounded-xl text-sm font-bold cursor-pointer ${
+                      activeTab === it.id ? "bg-[#E8F3EE] text-[#1E3E30]" : "text-slate-800 hover:bg-slate-50"
+                    }`}
+                  >
+                    {it.icon}
+                    {it.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

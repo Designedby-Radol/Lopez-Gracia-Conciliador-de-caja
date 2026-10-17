@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
+import { divisorHorasMes, fechasDelPeriodo, etiquetaRecargoDominical, totalizarTiempoPeriodo, type TiempoDia } from "../lib/payroll";
+import { liquidarQuincena } from "../lib/liquidacionQuincena";
+import { parseIsoDateLocal } from "../lib/dates";
+import { asignarMarcaciones } from "../lib/marcaciones";
 import { 
   DollarSign, 
   Sparkles, 
@@ -35,13 +39,8 @@ import {
   Sliders,
   Copy
 } from "lucide-react";
-import { jsPDF } from "jspdf";
-import * as pdfjsLib from "pdfjs-dist";
-// @ts-ignore
-import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { 
   checkColombianHolidayOrSunday, 
-  matchEmployeeName, 
   parseTimeToMinutes, 
   formatMinutesToTimeStr, 
   evaluateAttendanceDay,
@@ -51,9 +50,10 @@ import {
   generatePayrollTirillaJson
 } from "../utils/colombianPayroll";
 import { dbAdapter } from "../db/dbAdapter";
+import { api } from "../lib/api";
+import { loadPdfjs, loadJsPDF } from "../lib/lazyLibs";
 
 // Set up PDF worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 export const formatNumberWithDots = (val: number | string | undefined | null): string => {
   if (val === undefined || val === null || val === "" || isNaN(Number(val))) return "0";
@@ -289,6 +289,8 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
   // PDF / Excel Parser State
   const [isParsingPdf, setIsParsingPdf] = useState(false);
   const [pdfUploadNote, setPdfUploadNote] = useState<string | null>(null);
+  // Resultado de la asignación de marcaciones del último reporte cargado
+  const [marcacionesFaltantes, setMarcacionesFaltantes] = useState<{ sinMarcaciones: string[]; noAsignados: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Alertas de Auditoría (Fase 1) y Modal Tirilla JSON (Fase 2)
@@ -583,117 +585,8 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
   };
 
   // CÁLCULO MATEMÁTICO EN VIVO DE LA QUINCENA
-  const calculateQuincena = (config: EmployeeSalaryConfig, novs: QuincenaNovedades) => {
-    const salarioMensual = config.salarioBaseMensual || smmlvBase;
-    const valorHoraOrdinaria = salarioMensual / 230; // Hora ordinaria base CST (230 horas/mes)
-    const auxDiarioTransporte = auxTransporteBase / 30; // Aux. transporte mensual / 30 días
-
-    let salarioQuincenal = 0;
-    let auxTransporteTotal = 0;
-    let deduccionSalud = 0;
-    let deduccionPension = 0;
-
-    let diasAsistidosEfectivos = 0;
-    let diasLaboradosTotales = 0;
-
-    // Bonos Salariales y No Salariales desde la Ficha Técnica y Novedades
-    // Nota: El monto ingresado en la Ficha Técnica es el valor MENSUAL, por lo tanto en cada quincena se liquida el 50% (mitad en 1ª y mitad en 2ª quincena).
-    const bonosList = config.bonosConfigurados || [];
-    const bonosSalariales = bonosList
-      .filter(b => b.tipologia === "Salarial")
-      .reduce((sum, b) => sum + ((b.monto || 0) / 2), 0);
-
-    const bonosNoSalariales = bonosList
-      .filter(b => b.tipologia === "No Salarial")
-      .reduce((sum, b) => sum + ((b.monto || 0) / 2), 0) + (novs.bonoNoSalarial || 0);
-
-    // Recargos y Horas extra con factores Ley 2026:
-    const valHED = (novs.horasExtraDiurnas || 0) * (valorHoraOrdinaria * 1.25);
-    const valHEN = (novs.horasExtraNocturnas || 0) * (valorHoraOrdinaria * 1.75);
-    
-    // Recargo dominical / festivo (+90% sobre hora ordinaria)
-    const valRecargosDominicales = (novs.recargosDominicales || 0) * (valorHoraOrdinaria * 0.90);
-    
-    // Recargo nocturno (7:00 PM a 7:30 PM en Ventas o extensión): +35% sobre minutos
-    const horasRecargoNocturnoMinutos = (novs.minutosRecargoNocturnoTotal || 0) / 60;
-    const valRecargoNocturnoMinutos = horasRecargoNocturnoMinutos * (valorHoraOrdinaria * 0.35);
-
-    const valTotalRecargos = valRecargosDominicales + valRecargoNocturnoMinutos;
-
-    if (config.tipoContrato === "Por días") {
-      // Reglas para Contrato Por Días:
-      const tcDays = novs.diasTiempoCompleto !== undefined ? novs.diasTiempoCompleto : 4;
-      const mtDays = novs.diasMedioTiempo !== undefined ? novs.diasMedioTiempo : 0;
-      diasAsistidosEfectivos = tcDays + mtDays;
-      diasLaboradosTotales = diasAsistidosEfectivos;
-
-      // Horas ordinarias efectivas:
-      const totalHorasOrdinarias = (tcDays * 7.0) + (mtDays * 5.5);
-      salarioQuincenal = totalHorasOrdinarias * valorHoraOrdinaria;
-
-      // Auxilio de transporte únicamente por día laborado
-      if (config.auxilioTransporteAplica) {
-        auxTransporteTotal = diasAsistidosEfectivos * auxDiarioTransporte;
-      }
-
-      // EXONERACIÓN DE DEDUCCIONES: A personal por días NO se le hacen deducciones de Salud ni Pensión
-      deduccionSalud = 0;
-      deduccionPension = 0;
-    } else {
-      // Reglas para Contrato a Término Indefinido:
-      const diasLaborados = novs.diasLaboradosQuincena !== undefined ? novs.diasLaboradosQuincena : 15;
-      const diasAsistidos = novs.diasAsistidosTransporte !== undefined ? novs.diasAsistidosTransporte : (diasLaborados >= 2 ? diasLaborados - 2 : diasLaborados);
-
-      diasLaboradosTotales = diasLaborados;
-      diasAsistidosEfectivos = diasAsistidos;
-
-      // Salario quincenal proporcional a días laborados (incluye día de descanso semanal remunerado)
-      salarioQuincenal = (salarioMensual / 30) * diasLaborados;
-
-      // Auxilio de transporte pagado ÚNICAMENTE por los días que ASISTIÓ físicamente a trabajar ($8.303,16 COP/día)
-      if (config.auxilioTransporteAplica) {
-        auxTransporteTotal = diasAsistidos * auxDiarioTransporte;
-      }
-
-      // Deducciones de Ley (4% Salud + 4% Pensión sobre IBC que incluye Salario Base Quincenal + Extra + Recargos + Bonos Salariales)
-      const ibcQuincenal = salarioQuincenal + valHED + valHEN + valTotalRecargos + bonosSalariales;
-      deduccionSalud = ibcQuincenal * 0.04;
-      deduccionPension = ibcQuincenal * 0.04;
-    }
-
-    const totalIngresosSalariales = salarioQuincenal + valHED + valHEN + valTotalRecargos + bonosSalariales;
-    const totalIngresosNoSalariales = bonosNoSalariales;
-    const devengadoTotal = totalIngresosSalariales + auxTransporteTotal + totalIngresosNoSalariales;
-
-    const totalDeduccionesLey = deduccionSalud + deduccionPension;
-    const totalDeduccionesOtros = novs.deduccionesAdicionales || 0;
-    const totalDeducciones = totalDeduccionesLey + totalDeduccionesOtros;
-
-    const netoAPagar = devengadoTotal - totalDeducciones;
-
-    return {
-      salarioQuincenal,
-      auxTransporte: auxTransporteTotal,
-      valorHoraOrdinaria,
-      auxDiarioTransporte,
-      diasAsistidosEfectivos,
-      diasLaboradosTotales,
-      valHED,
-      valHEN,
-      valRecargosDominicales,
-      valRecargoNocturnoMinutos,
-      valTotalRecargos,
-      totalIngresosSalariales,
-      totalIngresosNoSalariales,
-      devengadoTotal,
-      deduccionSalud,
-      deduccionPension,
-      totalDeduccionesLey,
-      totalDeduccionesOtros,
-      totalDeducciones,
-      netoAPagar
-    };
-  };
+  const calculateQuincena = (config: EmployeeSalaryConfig, novs: QuincenaNovedades) =>
+    liquidarQuincena(config, novs, { smmlv: smmlvBase, auxTransporteMensual: auxTransporteBase, fechaFin });
 
   // PARSER DE REPORTES DE ASISTENCIA (EXCEL .XLSX / .CSV / PDF)
   const handleProcessAttendanceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -710,10 +603,10 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
       if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls") || fileName.endsWith(".csv")) {
         setPdfUploadNote("Interpretando hoja de cálculo POS Excel (filas, columnas A, D, H, N, O y cédula)...");
-        posParsedMap = parsePosExcelFile(arrayBuffer, teamMembers);
+        posParsedMap = await parsePosExcelFile(arrayBuffer, teamMembers);
       } else {
         setPdfUploadNote("Interpretando documento PDF POS...");
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const pdf = await (await loadPdfjs()).getDocument({ data: arrayBuffer }).promise;
         const pageTexts: string[] = [];
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
@@ -728,6 +621,13 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
         }
         posParsedMap = parsePosPdfPages(pageTexts, teamMembers);
       }
+
+      const asignacion = asignarMarcaciones(posParsedMap, teamMembers);
+      setMarcacionesFaltantes(
+        asignacion.sinMarcaciones.length > 0 || asignacion.noAsignados.length > 0
+          ? { sinMarcaciones: asignacion.sinMarcaciones, noAsignados: asignacion.noAsignados }
+          : null,
+      );
 
       const newNovedades = { ...quincenaNovedades };
       const newAlerts: {
@@ -744,36 +644,20 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
         const config = getEmployeeConfig(member);
         const isPorDias = config.tipoContrato === "Por días";
 
-        let posLogsForMember = posParsedMap[name];
-        if (!posLogsForMember) {
-          const keys = Object.keys(posParsedMap);
-          for (const k of keys) {
-            const matchedMember = matchEmployeeName(k, [member]);
-            if (matchedMember) {
-              posLogsForMember = posParsedMap[k];
-              break;
-            }
-          }
-        }
-        if (!posLogsForMember && Object.keys(posParsedMap).length === 1) {
-          posLogsForMember = posParsedMap[Object.keys(posParsedMap)[0]];
-        }
-
-        const memberLogs = posLogsForMember || {};
+        // Solo marcaciones identificadas con certeza (cédula o nombre + apellido).
+        const memberLogs = asignacion.porEmpleado[name] || {};
         const records: AttendanceRecord[] = [];
-        let totalMinutosAFavor = 0;
-        let totalMinutosEnContra = 0;
+        const tiempoPorDia: TiempoDia[] = [];
         let totalMinutosRecargoNocturno = 0;
         let totalHorasDominicalesFestivas = 0;
         let diasAsistidosFisicos = 0;
 
         const schedule = config.horarioSemanal || getDefaultSchedule(config.diaDescansoContractual);
 
-        for (let d = 1; d <= 15; d++) {
-          const diaStr = d < 10 ? `0${d}` : `${d}`;
-          const fechaStr = `2026-07-${diaStr}`;
-          const dateObj = new Date(2026, 6, d);
-          
+        // Recorre el período seleccionado (antes estaba fijo en 1–15 de julio de 2026).
+        for (const fechaStr of fechasDelPeriodo(fechaInicio, fechaFin)) {
+          const dateObj = parseIsoDateLocal(fechaStr);
+
           const dayNames: ("Domingo" | "Lunes" | "Martes" | "Miércoles" | "Jueves" | "Viernes" | "Sábado")[] = [
             "Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"
           ];
@@ -866,8 +750,12 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
             totalHorasDominicalesFestivas += evalRes.horasTrabajadasEfectivas;
           }
 
-          totalMinutosAFavor += evalRes.tiempoAdicionalSalidaMinutos;
-          totalMinutosEnContra += (evalRes.tardanzaEntradaMinutos + evalRes.salidaTempranaMinutos);
+          tiempoPorDia.push({
+            extraDiurnaMin: evalRes.extraDiurnaMinutos,
+            extraNocturnaMin: evalRes.extraNocturnaMinutos,
+            faltantesMin: evalRes.faltantesNoCompensadosMinutos,
+            recargoNocturnoMin: evalRes.recargoNocturnoMinutos,
+          });
           totalMinutosRecargoNocturno += evalRes.recargoNocturnoMinutos;
 
           records.push({
@@ -888,19 +776,11 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
           });
         }
 
-        const minutosNetos = totalMinutosAFavor - totalMinutosEnContra;
-        let horasExtraDiurnasNetas = 0;
-        let deduccionTiempoFaltante = 0;
-
         const salarioMensual = config.salarioBaseMensual || smmlvBase;
-        const valorHoraOrdinaria = salarioMensual / 230;
-
-        if (minutosNetos > 0) {
-          horasExtraDiurnasNetas = Math.round((minutosNetos / 60) * 10) / 10;
-        } else if (minutosNetos < 0) {
-          const minsFaltantesAbs = Math.abs(minutosNetos);
-          deduccionTiempoFaltante = Math.round((minsFaltantesAbs / 60) * valorHoraOrdinaria);
-        }
+        const valorHoraOrdinaria = salarioMensual / divisorHorasMes(fechaFin);
+        // Extra diurna (×1,25) y nocturna (×1,75) por separado; faltantes a valor ordinario, sin netear entre días.
+        const { horasExtraDiurnas, horasExtraNocturnas, deduccionTiempoFaltante } =
+          totalizarTiempoPeriodo(tiempoPorDia, valorHoraOrdinaria);
 
         let diasLaboradosCalculados = 15;
         if (isPorDias) {
@@ -912,8 +792,8 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
           diasAsistidosTransporte: diasAsistidosFisicos,
           diasTiempoCompleto: isPorDias ? diasAsistidosFisicos : 0,
           diasMedioTiempo: 0,
-          horasExtraDiurnas: horasExtraDiurnasNetas,
-          horasExtraNocturnas: 0,
+          horasExtraDiurnas,
+          horasExtraNocturnas,
           recargosDominicales: totalHorasDominicalesFestivas,
           minutosRecargoNocturnoTotal: totalMinutosRecargoNocturno,
           bonoNoSalarial: config.bonoFijoQuincenal || 0,
@@ -943,15 +823,13 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
   // Manejar respuesta del usuario a Alertas de Confirmación (Fase 1)
   const handleConfirmAlertChoice = (alertObj: any, decision: "INJUSTIFICADA" | "PERMISO") => {
     const { colaborador, fecha } = alertObj;
-    const config = getEmployeeConfig({ nombre: colaborador });
-    const salarioMensual = config.salarioBaseMensual || smmlvBase;
-    const descuentoDiaBase = Math.round(salarioMensual / 30);
 
     setQuincenaNovedades(prev => {
       const current = getNovedades(colaborador);
-      const updatedDeducciones = decision === "INJUSTIFICADA"
-        ? (current.deduccionesAdicionales || 0) + descuentoDiaBase
-        : current.deduccionesAdicionales;
+      // El día no pagado se refleja reduciendo diasLaboradosQuincena (salario proporcional).
+      // Antes además se sumaba salario/30 a deducciones: se descontaba dos veces.
+      // El auxilio de transporte ya excluye el día porque solo cuenta días con marcación.
+      const updatedDeducciones = current.deduccionesAdicionales;
 
       const updatedDiasLaborados = decision === "INJUSTIFICADA"
         ? Math.max(1, (current.diasLaboradosQuincena || 15) - 1)
@@ -971,13 +849,13 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
   };
 
   // EXPORTAR COMPROBANTE INDIVIDUAL EN PDF (SIN CAMPO DE FIRMA)
-  const handleExportIndividualPdf = (memberName: string) => {
+  const handleExportIndividualPdf = async (memberName: string) => {
     const member = teamMembers.find(m => m.nombre === memberName) || { nombre: memberName };
     const config = getEmployeeConfig(member);
     const novs = getNovedades(memberName);
     const calc = calculateQuincena(config, novs);
 
-    const doc = new jsPDF({
+    const doc = new (await loadJsPDF())({
       orientation: "portrait",
       unit: "mm",
       format: "a4"
@@ -1135,7 +1013,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
   };
 
   // GUARDAR LIQUIDACIÓN EN EL HISTORIAL
-  const handleSaveQuincenaToHistory = () => {
+  const handleSaveQuincenaToHistory = async () => {
     const newRecords: SavedSettlementRecord[] = teamMembers.map(m => {
       const config = getEmployeeConfig(m);
       const novs = getNovedades(m.nombre);
@@ -1163,11 +1041,17 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
     const updatedHistory = [...newRecords, ...savedHistory];
     setSavedHistory(updatedHistory);
 
-    // Guardar en Supabase turnos_nomina
+    // Guardar en Supabase turnos_nomina (esperando cada resultado para informar fallas reales)
+    const fallidos: string[] = [];
+    const idsGuardados: Record<string, string> = {};
     for (const rec of newRecords) {
       const member = teamMembers.find(m => m.nombre === rec.empleadoNombre);
-      if (member?.id) {
-        dbAdapter.saveTurnoNomina({
+      if (!member?.id) {
+        fallidos.push(`${rec.empleadoNombre} (sin ID de usuario)`);
+        continue;
+      }
+      try {
+        const guardado = await dbAdapter.saveTurnoNomina({
           usuarioId: member.id,
           localNameOrId: "Chapinero",
           fechaInicio: rec.periodoInicio,
@@ -1181,24 +1065,38 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
             devengadoTotal: rec.devengadoTotal,
             totalDeducciones: rec.deduccionesTotal,
             netoAPagar: rec.netoAPagar,
-            ...rec.desglose
+            ...rec.desglose,
+            // Marcaciones del período: alimentan el indicador de puntualidad
+            attendanceRecords: getNovedades(rec.empleadoNombre).attendanceRecords || []
           }
-        }).catch(e => console.error("Error al guardar turno de nómina en Supabase:", e));
+        });
+        if (guardado?.id) idsGuardados[rec.id] = guardado.id;
+      } catch (e: any) {
+        console.error("Error al guardar turno de nómina:", e);
+        fallidos.push(`${rec.empleadoNombre} (${e?.message || "error"})`);
       }
     }
+    // Con el id de la BD el registro ya se puede publicar como desprendible.
+    if (Object.keys(idsGuardados).length > 0) {
+      setSavedHistory(prev => prev.map(r => (idsGuardados[r.id] ? { ...r, id: idsGuardados[r.id] } : r)));
+    }
 
-    alert(`💾 ¡Liquidación de la quincena "${quincenaNombre}" guardada exitosamente en Supabase! Total colaboradores procesados: ${teamMembers.length}.`);
+    if (fallidos.length > 0) {
+      alert(`⚠️ La liquidación "${quincenaNombre}" NO se guardó para ${fallidos.length} colaborador(es):\n- ${fallidos.join("\n- ")}`);
+    } else {
+      alert(`💾 Liquidación de la quincena "${quincenaNombre}" guardada para ${newRecords.length} colaboradores.`);
+    }
   };
 
   // ELIMINAR REGISTRO DE HISTORIAL
   const handleDeleteHistoryRecord = async (id: string) => {
     if (confirm("¿Estás seguro de eliminar este registro del historial de pagos?")) {
-      const updated = savedHistory.filter(r => r.id !== id);
-      setSavedHistory(updated);
       try {
         await dbAdapter.deleteTurnoNomina(id);
-      } catch (e) {
-        console.error("Error al eliminar turno nómina en Supabase:", e);
+        setSavedHistory(prev => prev.filter(r => r.id !== id));
+      } catch (e: any) {
+        console.error("Error al eliminar turno nómina:", e);
+        alert(`No se pudo eliminar el registro: ${e?.message || "error desconocido"}`);
       }
     }
   };
@@ -1256,6 +1154,60 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
       setSelectedMemberName(teamMembers[0].nombre);
     }
   }, [teamMembers]);
+
+  // Desprendibles publicados, por id de liquidación (turnos_nomina)
+  const [desprendiblesPorTurno, setDesprendiblesPorTurno] = useState<Record<string, { id: string; version: number }>>({});
+  const [publicando, setPublicando] = useState(false);
+  const esIdBD = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+  const cargarDesprendibles = async () => {
+    try {
+      const r = await api<{ data: { id: string; turno_nomina_id: string | null; version: number }[] }>("/api/db/desprendibles");
+      const map: Record<string, { id: string; version: number }> = {};
+      for (const d of r.data) if (d.turno_nomina_id) map[d.turno_nomina_id] = { id: d.id, version: d.version };
+      setDesprendiblesPorTurno(map);
+    } catch (e) {
+      console.error("Error al cargar desprendibles publicados:", e);
+    }
+  };
+
+  useEffect(() => {
+    cargarDesprendibles();
+  }, []);
+
+  const handlePublicarDesprendibles = async (turnoIds: string[]) => {
+    const ids = turnoIds.filter(esIdBD);
+    if (ids.length === 0) {
+      alert("No hay liquidaciones guardadas pendientes de publicar. Guarda la quincena en el historial primero.");
+      return;
+    }
+    if (!confirm(`¿Publicar ${ids.length} desprendible(s)? Cada colaborador lo verá en su portal y recibirá un aviso. Si ya había uno publicado para el mismo período, se reemplaza por esta versión.`)) return;
+    setPublicando(true);
+    try {
+      const r = await api<{ data: { publicados: { usuario: string }[]; errores: string[] } }>("/api/db/desprendibles/publicar", {
+        method: "POST",
+        json: { turnoIds: ids },
+      });
+      await cargarDesprendibles();
+      const { publicados, errores } = r.data;
+      alert(`Se publicaron ${publicados.length} desprendible(s).` + (errores.length > 0 ? `\n\nNo se publicaron:\n- ${errores.join("\n- ")}` : ""));
+    } catch (e: any) {
+      alert(`No se pudieron publicar los desprendibles: ${e?.message || "error"}`);
+    } finally {
+      setPublicando(false);
+    }
+  };
+
+  const handleRetirarDesprendible = async (turnoId: string) => {
+    const pub = desprendiblesPorTurno[turnoId];
+    if (!pub || !confirm("¿Retirar este desprendible? El colaborador dejará de verlo en su portal.")) return;
+    try {
+      await api(`/api/db/desprendibles/${encodeURIComponent(pub.id)}/retirar`, { method: "POST" });
+      await cargarDesprendibles();
+    } catch (e: any) {
+      alert(`No se pudo retirar: ${e?.message || "error"}`);
+    }
+  };
 
   // Historial filtrado
   const filteredHistory = savedHistory.filter(item => {
@@ -1342,7 +1294,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
             <Calendar className="w-5 h-5" />
           </div>
           <div>
-            <span className="text-[10px] font-black uppercase tracking-wider text-brand-ink/50 block">Período de Nómina Seleccionado</span>
+            <span className="text-[11px] font-black uppercase tracking-wider text-brand-ink/50 block">Período de Nómina Seleccionado</span>
             <div className="flex flex-wrap items-center gap-2 mt-0.5">
               <input
                 type="text"
@@ -1388,31 +1340,31 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
           </h4>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-emerald-900">
             <div className="bg-white p-3 rounded-xl border border-emerald-200 space-y-1">
-              <span className="font-bold block text-[10px] text-emerald-700 uppercase">SMMLV 2026 Mensual</span>
+              <span className="font-bold block text-[11px] text-emerald-700 uppercase">SMMLV 2026 Mensual</span>
               <MoneyInput
                 value={smmlvBase}
                 onChange={(val) => handleUpdateSmmlvGlobal(val, auxTransporteBase)}
                 className="w-full bg-emerald-50/50 border border-emerald-300 p-1 font-mono font-black text-sm rounded outline-none"
               />
-              <span className="text-[10px] text-emerald-700 font-bold block">
+              <span className="text-[11px] text-emerald-700 font-bold block">
                 $ {formatNumberWithDots(smmlvBase)} COP / mes
               </span>
             </div>
             <div className="bg-white p-3 rounded-xl border border-emerald-200 space-y-1">
-              <span className="font-bold block text-[10px] text-emerald-700 uppercase">Auxilio de Transporte Mensual</span>
+              <span className="font-bold block text-[11px] text-emerald-700 uppercase">Auxilio de Transporte Mensual</span>
               <MoneyInput
                 value={auxTransporteBase}
                 onChange={(val) => handleUpdateSmmlvGlobal(smmlvBase, val)}
                 className="w-full bg-emerald-50/50 border border-emerald-300 p-1 font-mono font-black text-sm rounded outline-none"
               />
-              <span className="text-[10px] text-emerald-700 font-bold block">
+              <span className="text-[11px] text-emerald-700 font-bold block">
                 $ {formatNumberWithDots(auxTransporteBase)} COP (${formatNumberWithDots(Math.round(auxTransporteBase / 30))}/día)
               </span>
             </div>
             <div className="bg-white p-3 rounded-xl border border-emerald-200 space-y-1">
-              <span className="font-bold block text-[10px] text-emerald-700 uppercase">Jornada Semanal</span>
-              <span className="font-black text-sm block pt-1">42 Horas Semanales</span>
-              <span className="text-[10px] text-emerald-700 font-bold block">(Divisor 210 hrs/mes)</span>
+              <span className="font-bold block text-[11px] text-emerald-700 uppercase">Jornada Semanal</span>
+              <span className="font-black text-sm block pt-1">{divisorHorasMes(fechaFin) / 5} Horas Semanales</span>
+              <span className="text-[11px] text-emerald-700 font-bold block">(Divisor {divisorHorasMes(fechaFin)} hrs/mes)</span>
             </div>
           </div>
         </div>
@@ -1431,7 +1383,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                 <div>
                   <h3 className="text-sm font-black text-brand-ink uppercase tracking-wider flex items-center gap-2">
                     <span>Cargar Reporte de Asistencia POS (Excel .xlsx / .csv)</span>
-                    <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] px-2 py-0.5 rounded font-black">2026 Norma CST</span>
+                    <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] px-2 py-0.5 rounded font-black">2026 Norma CST</span>
                   </h3>
                   <p className="text-xs text-zinc-600">
                     Sube la hoja de cálculo exportada por el sistema POS. Columnas automáticas: A (Cédula), D (Nombres), H (Apellidos), N (Entrada), O (Salida).
@@ -1472,6 +1424,28 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                 <span>{pdfUploadNote}</span>
               </div>
             )}
+
+            {marcacionesFaltantes && (
+              <div className="p-3 bg-amber-50 border border-amber-400 text-amber-950 text-xs rounded-xl space-y-1.5">
+                <div className="flex items-center space-x-2 font-black">
+                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>Revisa las marcaciones antes de liquidar</span>
+                </div>
+                {marcacionesFaltantes.sinMarcaciones.length > 0 && (
+                  <p>
+                    <strong>Sin marcaciones encontradas ({marcacionesFaltantes.sinMarcaciones.length}):</strong>{" "}
+                    {marcacionesFaltantes.sinMarcaciones.join(", ")}. Verifica que el reporte los incluya y que su
+                    cédula o nombre y apellido coincidan con la ficha.
+                  </p>
+                )}
+                {marcacionesFaltantes.noAsignados.length > 0 && (
+                  <p>
+                    <strong>En el reporte pero sin colaborador asociado:</strong>{" "}
+                    {marcacionesFaltantes.noAsignados.join(", ")}.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* FASE 1: AUDITORÍA Y ALERTAS DE CONFIRMACIÓN */}
@@ -1498,7 +1472,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       <span className="font-black text-amber-950">
                         * Colaborador: <span className="text-brand-ink underline">{alertItem.colaborador}</span>
                       </span>
-                      <span className="bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded text-[10px]">
+                      <span className="bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded text-[11px]">
                         * Días con marcación en Excel: {alertItem.diasMarcacion} de {alertItem.diasEsperados} esperados
                       </span>
                     </div>
@@ -1532,7 +1506,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Lista Lateral de Integrantes */}
             <div className="lg:col-span-1 bg-white border-2 border-brand-ink rounded-2xl shadow-[4px_4px_0px_0px_#1C1917] p-4 space-y-3">
-              <span className="text-[10px] font-black uppercase text-brand-ink/50 block tracking-wider">
+              <span className="text-[11px] font-black uppercase text-brand-ink/50 block tracking-wider">
                 Selecciona Colaborador para Revisar
               </span>
 
@@ -1555,7 +1529,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                     >
                       <div>
                         <span className="font-black text-xs block leading-tight">{member.nombre}</span>
-                        <div className="flex items-center space-x-1.5 mt-1 text-[9.5px]">
+                        <div className="flex items-center space-x-1.5 mt-1 text-[11px]">
                           <span className={`px-1.5 py-0.5 rounded font-bold uppercase ${
                             isSelected ? "bg-white/20 text-white" : "bg-emerald-100 text-emerald-800"
                           }`}>
@@ -1601,7 +1575,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                               C.C. {config.cedula || member.cedula}
                             </span>
                           )}
-                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-black uppercase rounded">
+                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] font-black uppercase rounded">
                             {config.area}
                           </span>
                         </div>
@@ -1644,7 +1618,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       {/* Devengados */}
                       <div className="bg-emerald-50/60 border border-emerald-300 p-4 rounded-xl space-y-2">
-                        <span className="text-[10px] font-black uppercase text-emerald-900 tracking-wider block border-b border-emerald-200 pb-1">
+                        <span className="text-[11px] font-black uppercase text-emerald-900 tracking-wider block border-b border-emerald-200 pb-1">
                           🟢 Devengados (Ingresos)
                         </span>
 
@@ -1698,7 +1672,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
                       {/* Deducciones */}
                       <div className="bg-red-50/60 border border-red-200 p-4 rounded-xl space-y-2">
-                        <span className="text-[10px] font-black uppercase text-red-900 tracking-wider block border-b border-red-200 pb-1">
+                        <span className="text-[11px] font-black uppercase text-red-900 tracking-wider block border-b border-red-200 pb-1">
                           🔴 Deducciones (Descuentos)
                         </span>
 
@@ -1730,18 +1704,18 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       {/* Neto a Pagar */}
                       <div className="bg-brand-ink text-white p-4 rounded-xl space-y-3 flex flex-col justify-between shadow-md">
                         <div>
-                          <span className="text-[10px] font-black uppercase text-emerald-400 tracking-wider block mb-1">
+                          <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider block mb-1">
                             💰 Neto a Pagar (Quincena)
                           </span>
                           <span className="text-2xl font-black font-mono block text-white mt-1">
                             {formatCOP(calc.netoAPagar)}
                           </span>
-                          <span className="text-[10px] text-zinc-300 font-medium block mt-1">
+                          <span className="text-[11px] text-zinc-300 font-medium block mt-1">
                             Días efectivamente asistidos: {calc.diasAsistidosEfectivos} de {calc.diasLaboradosTotales} días.
                           </span>
                         </div>
 
-                        <div className="pt-2 border-t border-white/10 text-[10px] text-zinc-400 space-y-0.5">
+                        <div className="pt-2 border-t border-white/10 text-[11px] text-zinc-400 space-y-0.5">
                           <div>Valor hora ordinaria: ${Math.round(calc.valorHoraOrdinaria).toLocaleString("es-CO")} COP</div>
                           <div>Aux. transp. diario: ${Math.round(calc.auxDiarioTransporte).toLocaleString("es-CO")} COP</div>
                         </div>
@@ -1758,7 +1732,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         {config.tipoContrato === "Por días" ? (
                           <>
                             <div>
-                              <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Días Tiempo Completo (7h)</label>
+                              <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Días Tiempo Completo (7h)</label>
                               <input
                                 type="number"
                                 value={novs.diasTiempoCompleto}
@@ -1767,7 +1741,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                               />
                             </div>
                             <div>
-                              <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Días Medio Tiempo (5.5h)</label>
+                              <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Días Medio Tiempo (5.5h)</label>
                               <input
                                 type="number"
                                 value={novs.diasMedioTiempo}
@@ -1779,7 +1753,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         ) : (
                           <>
                             <div>
-                              <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Días Laborados Quincena</label>
+                              <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Días Laborados Quincena</label>
                               <input
                                 type="number"
                                 value={novs.diasLaboradosQuincena}
@@ -1788,7 +1762,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                               />
                             </div>
                             <div>
-                              <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Días Asistidos Transporte</label>
+                              <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Días Asistidos Transporte</label>
                               <input
                                 type="number"
                                 value={novs.diasAsistidosTransporte}
@@ -1800,7 +1774,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         )}
 
                         <div>
-                          <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Horas Extra Diurnas</label>
+                          <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Horas Extra Diurnas</label>
                           <input
                             type="number"
                             value={novs.horasExtraDiurnas}
@@ -1810,7 +1784,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Horas Dominicales</label>
+                          <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Horas Dominicales</label>
                           <input
                             type="number"
                             value={novs.recargosDominicales}
@@ -1820,25 +1794,25 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Bono Adicional Quincenal (COP)</label>
+                          <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Bono Adicional Quincenal (COP)</label>
                           <MoneyInput
                             value={novs.bonoNoSalarial || 0}
                             onChange={(val) => updateNovedades(selectedMemberName, "bonoNoSalarial", val)}
                             className="w-full bg-white border border-zinc-300 p-1.5 font-mono font-bold text-xs rounded outline-none"
                           />
-                          <span className="text-[9px] text-zinc-500 font-bold block mt-0.5">
+                          <span className="text-[11px] text-zinc-500 font-bold block mt-0.5">
                             $ {formatNumberWithDots(novs.bonoNoSalarial || 0)} COP
                           </span>
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-bold text-zinc-600 block mb-0.5">Deducción / Descuento (COP)</label>
+                          <label className="text-[11px] font-bold text-zinc-600 block mb-0.5">Deducción / Descuento (COP)</label>
                           <MoneyInput
                             value={novs.deduccionesAdicionales || 0}
                             onChange={(val) => updateNovedades(selectedMemberName, "deduccionesAdicionales", val)}
                             className="w-full bg-white border border-zinc-300 p-1.5 font-mono font-bold text-xs rounded outline-none"
                           />
-                          <span className="text-[9px] text-zinc-500 font-bold block mt-0.5">
+                          <span className="text-[11px] text-zinc-500 font-bold block mt-0.5">
                             $ {formatNumberWithDots(novs.deduccionesAdicionales || 0)} COP
                           </span>
                         </div>
@@ -1855,14 +1829,14 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                               Detalle de Marcas de Reloj y Asistencia POS (Quincena)
                             </h4>
                           </div>
-                          <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
+                          <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
                             {novs.attendanceRecords.length} Días Evaluados
                           </span>
                         </div>
 
                         <div className="overflow-x-auto">
                           <table className="w-full text-left text-[11px]">
-                            <thead className="bg-zinc-100 text-zinc-700 font-black uppercase text-[9px] border-b border-zinc-200">
+                            <thead className="bg-zinc-100 text-zinc-700 font-black uppercase text-[11px] border-b border-zinc-200">
                               <tr>
                                 <th className="p-2">Fecha / Día</th>
                                 <th className="p-2">Horario Pactado</th>
@@ -1878,10 +1852,10 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                                 <tr key={idx} className={rec.isDomingoOFestivo ? "bg-amber-50/60 font-semibold" : "hover:bg-zinc-50"}>
                                   <td className="p-2 whitespace-nowrap">
                                     <div className="font-bold text-zinc-900">{rec.fecha}</div>
-                                    <div className="text-[9px] text-zinc-500">{rec.diaSemana}</div>
+                                    <div className="text-[11px] text-zinc-500">{rec.diaSemana}</div>
                                     {rec.isDomingoOFestivo && (
-                                      <span className="text-[8px] bg-amber-200 text-amber-900 px-1 py-0.2 rounded font-black uppercase inline-block mt-0.5">
-                                        +90% Dominical/Festivo
+                                      <span className="text-[11px] bg-amber-200 text-amber-900 px-1 py-0.2 rounded font-black uppercase inline-block mt-0.5">
+                                        {etiquetaRecargoDominical(rec.fecha)} Dominical/Festivo
                                       </span>
                                     )}
                                   </td>
@@ -1891,7 +1865,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                                   <td className="p-2 font-mono text-zinc-900 whitespace-nowrap">
                                     {rec.horaIngreso}
                                     {rec.llegadaAntesIgnoradaMinutos ? (
-                                      <span className="text-[8px] text-zinc-500 block">
+                                      <span className="text-[11px] text-zinc-500 block">
                                         ({rec.llegadaAntesIgnoradaMinutos} min antes - no suma)
                                       </span>
                                     ) : null}
@@ -1913,7 +1887,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                                       <span className="text-zinc-400">0 min</span>
                                     )}
                                   </td>
-                                  <td className="p-2 text-zinc-600 text-[10px]">
+                                  <td className="p-2 text-zinc-600 text-[11px]">
                                     {rec.observacion}
                                   </td>
                                 </tr>
@@ -1970,12 +1944,12 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                   Ficha Técnica y Gestión de Equipo
                 </h3>
                 {isAdmin ? (
-                  <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase rounded-full flex items-center space-x-1">
+                  <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-[11px] font-black uppercase rounded-full flex items-center space-x-1">
                     <Unlock className="w-3 h-3" />
                     <span>Modo Edición Admin</span>
                   </span>
                 ) : (
-                  <span className="px-2.5 py-0.5 bg-amber-100 text-amber-900 text-[10px] font-black uppercase rounded-full flex items-center space-x-1">
+                  <span className="px-2.5 py-0.5 bg-amber-100 text-amber-900 text-[11px] font-black uppercase rounded-full flex items-center space-x-1">
                     <Lock className="w-3 h-3" />
                     <span>Solo Administrador (Solo Lectura)</span>
                   </span>
@@ -2047,7 +2021,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 text-xs">
                       <div>
-                        <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                        <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                           Número de Cédula (C.C.)
                         </label>
                         <input
@@ -2061,7 +2035,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       </div>
 
                       <div>
-                        <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                        <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                           Salario Base Mensual (COP)
                         </label>
                         <div className="flex space-x-1.5">
@@ -2076,7 +2050,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                             <button
                               onClick={() => updateConfig(member.nombre, "salarioBaseMensual", smmlvBase)}
                               title="Asignar Salario Mínimo Legal Vigente"
-                              className="px-2 bg-zinc-200 hover:bg-zinc-300 text-brand-ink text-[9px] font-black uppercase rounded-lg shrink-0 cursor-pointer"
+                              className="px-2 bg-zinc-200 hover:bg-zinc-300 text-brand-ink text-[11px] font-black uppercase rounded-lg shrink-0 cursor-pointer"
                             >
                               SMMLV
                             </button>
@@ -2085,7 +2059,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       </div>
 
                       <div>
-                        <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                        <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                           Tipo de Contrato
                         </label>
                         <select
@@ -2100,7 +2074,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       </div>
 
                       <div>
-                        <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                        <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                           Asignación de Rol
                         </label>
                         <select
@@ -2117,7 +2091,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       </div>
 
                       <div>
-                        <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                        <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                           Puntaje de Propinas
                         </label>
                         <input
@@ -2143,7 +2117,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       {isAdmin && (
                         <button
                           onClick={() => handleAddBonus(member.nombre)}
-                          className="px-3 py-1 bg-emerald-700 text-white hover:bg-emerald-800 text-[10px] font-black uppercase rounded-lg flex items-center space-x-1 cursor-pointer"
+                          className="px-3 py-1 bg-emerald-700 text-white hover:bg-emerald-800 text-[11px] font-black uppercase rounded-lg flex items-center space-x-1 cursor-pointer"
                         >
                           <Plus className="w-3 h-3" />
                           <span>Agregar Bono</span>
@@ -2158,7 +2132,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         {bonosList.map((bono) => (
                           <div key={bono.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center bg-zinc-50 p-2.5 rounded-lg border border-zinc-200 text-xs">
                             <div className="sm:col-span-5">
-                              <label className="text-[9px] font-bold text-zinc-500 uppercase block">Concepto / Nombre del Bono</label>
+                              <label className="text-[11px] font-bold text-zinc-500 uppercase block">Concepto / Nombre del Bono</label>
                               <input
                                 type="text"
                                 disabled={!isAdmin}
@@ -2169,7 +2143,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                             </div>
 
                             <div className="sm:col-span-3">
-                              <label className="text-[9px] font-bold text-zinc-500 uppercase block">Monto (COP)</label>
+                              <label className="text-[11px] font-bold text-zinc-500 uppercase block">Monto (COP)</label>
                               <input
                                 type="number"
                                 disabled={!isAdmin}
@@ -2180,7 +2154,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                             </div>
 
                             <div className="sm:col-span-3">
-                              <label className="text-[9px] font-bold text-zinc-500 uppercase block">Tipología de Ley</label>
+                              <label className="text-[11px] font-bold text-zinc-500 uppercase block">Tipología de Ley</label>
                               <select
                                 disabled={!isAdmin}
                                 value={bono.tipologia}
@@ -2217,7 +2191,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         <Info className="w-3.5 h-3.5 text-emerald-700 inline" />
                         <span>Resumen de afectación de Ley para bonos:</span>
                       </p>
-                      <ul className="list-disc list-inside space-y-0.5 text-[10px] text-emerald-800">
+                      <ul className="list-disc list-inside space-y-0.5 text-[11px] text-emerald-800">
                         <li><strong>Bonos Salariales:</strong> Incrementan la Base de Cotización (IBC) e incrementan los aportes de Salud (4%) y Pensión (4%).</li>
                         <li><strong>Bonos No Salariales:</strong> Se pagan directamente en el devengado total sin generar retención ni retenciones de aportes de ley.</li>
                       </ul>
@@ -2234,7 +2208,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
                       {/* CONTADOR DE HORAS SEMANALES EN TIEMPO REAL */}
                       <div className="flex items-center space-x-2">
-                        <span className="text-[10px] font-black uppercase text-zinc-500">Carga Semanal:</span>
+                        <span className="text-[11px] font-black uppercase text-zinc-500">Carga Semanal:</span>
                         {weeklyHours <= 42 ? (
                           <span className="px-2.5 py-1 bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-black rounded-lg flex items-center space-x-1">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
@@ -2251,7 +2225,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center bg-zinc-50 p-3 rounded-lg border border-zinc-200 text-xs">
                       <div>
-                        <label className="text-[10px] font-black uppercase text-zinc-600 block mb-1">
+                        <label className="text-[11px] font-black uppercase text-zinc-600 block mb-1">
                           Día de Descanso Estipulado en Contrato
                         </label>
                         <select
@@ -2274,8 +2248,8 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                         </select>
                       </div>
 
-                      <div className="text-[10px] text-zinc-600 leading-snug">
-                        <strong className="text-zinc-800">Lógica de Recargo Dominical:</strong> Si labora un domingo pero su descanso contractual es p. ej. <em>Martes</em>, el domingo se liquida como ordinario (+0%). Si labora en su día de descanso estipulado o festivo, aplica el incremento legal del +90%.
+                      <div className="text-[11px] text-zinc-600 leading-snug">
+                        <strong className="text-zinc-800">Lógica de Recargo Dominical:</strong> Si labora un domingo pero su descanso contractual es p. ej. <em>Martes</em>, el domingo se liquida como ordinario (+0%). Si labora en su día de descanso estipulado o festivo, aplica el recargo legal vigente ({etiquetaRecargoDominical(fechaFin)} para este período; Ley 2466 de 2025: 80% desde jul-2025, 90% desde jul-2026, 100% desde jul-2027).
                       </div>
                     </div>
 
@@ -2283,7 +2257,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                     <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse text-xs">
                         <thead>
-                          <tr className="bg-zinc-100 border-b border-zinc-200 text-[10px] font-black text-zinc-600 uppercase">
+                          <tr className="bg-zinc-100 border-b border-zinc-200 text-[11px] font-black text-zinc-600 uppercase">
                             <th className="p-2">Día</th>
                             <th className="p-2">Labora</th>
                             <th className="p-2">Hora Entrada</th>
@@ -2299,7 +2273,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                                 <td className="p-2 font-bold text-brand-ink flex items-center space-x-1.5">
                                   <span>{day.dia}</span>
                                   {isRestDay && (
-                                    <span className="text-[9px] bg-amber-200 text-amber-900 font-black px-1.5 py-0.5 rounded">
+                                    <span className="text-[11px] bg-amber-200 text-amber-900 font-black px-1.5 py-0.5 rounded">
                                       Descanso
                                     </span>
                                   )}
@@ -2345,13 +2319,13 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                   {/* BLOQUE 4: INFORMACION PARTICULAR LIBRE & IA */}
                   <div className="bg-white border border-zinc-200 p-4 rounded-xl space-y-2">
                     <div className="flex items-center justify-between">
-                      <label className="text-[10px] font-black uppercase text-zinc-700 tracking-wider">
+                      <label className="text-[11px] font-black uppercase text-zinc-700 tracking-wider">
                         4. Información Particular / Condiciones Especiales (Texto Libre)
                       </label>
 
                       <button
                         onClick={() => parseInformacionParticular(member.nombre)}
-                        className="text-[10px] font-black text-emerald-700 hover:text-emerald-900 flex items-center space-x-1 cursor-pointer"
+                        className="text-[11px] font-black text-emerald-700 hover:text-emerald-900 flex items-center space-x-1 cursor-pointer"
                       >
                         <Bot className="w-3.5 h-3.5" />
                         <span>🤖 Extraer Reglas con IA</span>
@@ -2409,6 +2383,22 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                   <option key={m.nombre} value={m.nombre}>{m.nombre}</option>
                 ))}
               </select>
+
+              {(() => {
+                const sinPublicar = filteredHistory.filter(r => esIdBD(r.id) && !desprendiblesPorTurno[r.id]).map(r => r.id);
+                return (
+                  <button
+                    type="button"
+                    onClick={() => handlePublicarDesprendibles(sinPublicar)}
+                    disabled={publicando || sinPublicar.length === 0}
+                    className="py-1.5 px-3 text-xs font-bold rounded-lg bg-[#1E3E30] text-white hover:bg-[#163025] disabled:opacity-50 cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                    title="Publica los desprendibles de las liquidaciones visibles que aún no se han publicado"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    {publicando ? "Publicando…" : `Publicar desprendibles (${sinPublicar.length})`}
+                  </button>
+                );
+              })()}
             </div>
           </div>
 
@@ -2426,7 +2416,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                  <tr className="bg-zinc-100 border-b border-zinc-300 text-[10px] font-black uppercase text-zinc-600">
+                  <tr className="bg-zinc-100 border-b border-zinc-300 text-[11px] font-black uppercase text-zinc-600">
                     <th className="p-3">Periodo / Quincena</th>
                     <th className="p-3">Colaborador</th>
                     <th className="p-3">Cargo / Área</th>
@@ -2434,6 +2424,7 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                     <th className="p-3 text-right">Devengado</th>
                     <th className="p-3 text-right">Deducciones</th>
                     <th className="p-3 text-right">Neto Pagado</th>
+                    <th className="p-3 text-center">Desprendible</th>
                     <th className="p-3 text-center">Comprobante</th>
                   </tr>
                 </thead>
@@ -2442,21 +2433,21 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                     <tr key={record.id} className="hover:bg-zinc-50 transition-colors">
                       <td className="p-3 font-bold text-brand-ink">
                         {record.quincenaNombre}
-                        <span className="block text-[9px] text-zinc-400 font-normal">
+                        <span className="block text-[11px] text-zinc-400 font-normal">
                           {new Date(record.fechaRegistro).toLocaleDateString("es-CO")}
                         </span>
                       </td>
 
                       <td className="p-3 font-black text-brand-ink">
                         {record.empleadoNombre}
-                        <span className="block text-[9px] text-zinc-500 font-normal">
+                        <span className="block text-[11px] text-zinc-500 font-normal">
                           Contrato: {record.tipoContrato}
                         </span>
                       </td>
 
                       <td className="p-3">
                         {record.cargo}
-                        <span className="inline-block ml-1 px-1.5 py-0.2 bg-zinc-200 text-zinc-800 text-[9px] rounded font-bold uppercase">
+                        <span className="inline-block ml-1 px-1.5 py-0.2 bg-zinc-200 text-zinc-800 text-[11px] rounded font-bold uppercase">
                           {record.area}
                         </span>
                       </td>
@@ -2476,10 +2467,34 @@ export default function SalariesManager({ teamMembers, currentUserRole = "gerent
                       </td>
 
                       <td className="p-3 text-center">
+                        {desprendiblesPorTurno[record.id] ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 text-[11px] font-bold">
+                              Publicado{desprendiblesPorTurno[record.id].version > 1 ? ` · v${desprendiblesPorTurno[record.id].version}` : ""}
+                            </span>
+                            <button type="button" onClick={() => handleRetirarDesprendible(record.id)} className="text-[11px] font-bold text-zinc-500 hover:text-red-700 cursor-pointer">
+                              Retirar
+                            </button>
+                          </div>
+                        ) : esIdBD(record.id) ? (
+                          <button
+                            type="button"
+                            onClick={() => handlePublicarDesprendibles([record.id])}
+                            disabled={publicando}
+                            className="px-2 py-1 rounded-lg border border-[#1E3E30] text-[#1E3E30] text-[11px] font-bold hover:bg-[#E8F3EE] disabled:opacity-50 cursor-pointer"
+                          >
+                            Publicar
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-zinc-400 font-semibold">Sin guardar</span>
+                        )}
+                      </td>
+
+                      <td className="p-3 text-center">
                         <div className="flex items-center justify-center space-x-1">
                           <button
                             onClick={() => handleExportIndividualPdf(record.empleadoNombre)}
-                            className="p-1.5 bg-brand-ink text-white hover:bg-black rounded-lg text-[10px] font-black uppercase flex items-center space-x-1 cursor-pointer"
+                            className="p-1.5 bg-brand-ink text-white hover:bg-black rounded-lg text-[11px] font-black uppercase flex items-center space-x-1 cursor-pointer"
                             title="Descargar Comprobante PDF"
                           >
                             <Download className="w-3.5 h-3.5" />

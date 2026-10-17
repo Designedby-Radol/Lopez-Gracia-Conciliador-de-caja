@@ -75,7 +75,9 @@ El sistema resuelve la complejidad del cierre diario de caja y la conciliación 
 | **Procesamiento de Archivos** | `pdfjs-dist` (análisis de PDF), `jspdf` (recibos y reportes PDF), `xlsx` (exportación Excel) |
 | **Backend & Servidor** | Node.js, Express 4.x, Vite 6 como middleware de desarrollo |
 | **Compilación de Producción**| `esbuild` (bundling a `dist/server.cjs`), Vite SPA build |
-| **Persistencia de Datos** | Firebase Firestore / Supabase con arquitectura desacoplada y estado reactivo |
+| **Persistencia de Datos** | Supabase (PostgreSQL) accedido solo desde el servidor con `service_role`; RLS activo |
+| **Seguridad** | Sesión firmada en cookie httpOnly, contraseñas con scrypt, permisos por rol en el servidor |
+| **Pruebas** | Vitest (`npm test`) para descuadres, 60/40, propinas, nómina, festivos y sesión |
 
 ---
 
@@ -91,24 +93,34 @@ npm install
 ```
 
 ### 2. Configuración de variables de entorno
-Crea un archivo `.env` o copia las variables necesarias:
 ```bash
 cp .env.example .env
 ```
+Obligatorias: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` y `SESSION_SECRET` (32+ caracteres aleatorios).
+El navegador ya no recibe ninguna clave de Supabase.
 
-### 3. Modo de desarrollo
+### 3. Base de datos (una sola vez)
+Ejecuta en Supabase → SQL Editor, en este orden:
+1. `supabase/migrations/20261008_seguridad.sql` (credenciales, auditoría, configuración y RLS)
+2. `supabase/migrations/20261008b_operacion.sql` (inventarios y checklists)
+3. `supabase/migrations/20261008c_alineacion_esquema.sql` (columnas que usa el servidor, nómina, índices y permisos)
+
+En el primer ingreso cada usuario debe cambiar su contraseña. Gerencia asigna claves temporales desde **Seguridad & Roles**.
+
+### 4. Modo de desarrollo
 Inicia el servidor local con Express y Vite:
 ```bash
 npm run dev
 ```
 La aplicación estará disponible en `http://localhost:3000`.
 
-### 4. Verificación de tipos y linting
+### 5. Verificación de tipos y pruebas
 ```bash
 npm run lint
+npm test
 ```
 
-### 5. Compilación para producción
+### 6. Compilación para producción
 Compila los activos del cliente y empaqueta el servidor Node.js autónomo:
 ```bash
 npm run build

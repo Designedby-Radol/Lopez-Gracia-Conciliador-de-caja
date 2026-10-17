@@ -1,26 +1,78 @@
-import React, { useState, useEffect } from "react";
-import { 
-  Package, 
-  Plus, 
-  Trash2, 
-  Calculator, 
-  Save, 
-  History, 
-  CheckCircle2, 
-  Search, 
-  Calendar, 
-  ChevronDown, 
-  ChevronUp, 
-  FileText, 
+import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
+import {
+  Package,
+  Plus,
+  Trash2,
+  Calculator,
+  Save,
+  History,
+  CheckCircle2,
+  Search,
+  Calendar,
+  ChevronDown,
+  ChevronUp,
+  FileText,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  RefreshCw,
+  Boxes,
+  ArrowLeftRight,
+  Receipt,
+  Link2
 } from "lucide-react";
+import { todayBogota } from "../lib/dates";
+import { operacionAdapter } from "../db/operacionAdapter";
+import { inventarioPosAdapter } from "../db/inventarioPosAdapter";
+import { calcularExpresionConteo, normalizarNombre, type BodegaPOS, type CatalogoItemPOS } from "../lib/inventarioPos";
+import CuadrePOS from "./inventario/CuadrePOS";
+
+// Vistas de Gerencia: se cargan solo al abrir la pestaña.
+const ExistenciasPOS = lazy(() => import("./inventario/ExistenciasPOS"));
+const MovimientosPOS = lazy(() => import("./inventario/MovimientosPOS"));
+const CostoVentasPOS = lazy(() => import("./inventario/CostoVentasPOS"));
+
+/**
+ * Si el código de una pestaña diferida no carga (p. ej. tras un despliegue cambian los
+ * archivos, o se cae la red) muestra un aviso en lugar de dejar toda la app en blanco.
+ */
+class LimiteErrorVista extends React.Component<{ children: React.ReactNode }, { error: boolean }> {
+  declare props: { children: React.ReactNode };
+  state = { error: false };
+
+  static getDerivedStateFromError() {
+    return { error: true };
+  }
+
+  componentDidCatch(e: unknown) {
+    console.error("No se pudo cargar la vista de inventario:", e);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div role="alert" className="bg-red-50 border border-red-200 text-red-800 text-sm font-bold p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <span>No se pudo cargar la vista. Puede que haya una versión nueva de la aplicación o que falle la conexión.</span>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="px-3 py-1.5 bg-white border border-red-200 hover:bg-red-100 rounded-lg text-xs font-bold text-red-800 cursor-pointer shrink-0 self-start sm:self-auto"
+        >
+          Recargar
+        </button>
+      </div>
+    );
+  }
+}
 
 export interface InsumoMaster {
   id: string;
   nombre: string;
   unidad: string; // "g", "kg", "ml", "L", "uds", "cajas", "paquetes"
   categoria: string;
+  posItemId?: number; // solo catálogo IntuiPOS
+  subcategoria?: string;
+  minimo?: number;
+  maximo?: number;
 }
 
 export interface InsumoCountItem {
@@ -32,6 +84,8 @@ export interface InsumoCountItem {
   rawExpression: string; // e.g. "340+250+300"
   total: number; // 890
   notas?: string;
+  posItemId?: number;
+  subcategoria?: string;
 }
 
 export interface InventoryClosureRecord {
@@ -44,7 +98,35 @@ export interface InventoryClosureRecord {
   observacionesGenerales: string;
   totalItemsCounted: number;
   items: InsumoCountItem[];
+  fuenteCatalogo?: "pos" | "manual"; // registros anteriores: manual
+  bodegaPOS?: BodegaPOS;
 }
+
+type FuenteCatalogo = "cargando" | "pos" | "manual";
+type PestanaInventario = "new" | "history" | "catalog" | "existencias" | "movimientos" | "costo";
+
+function insumoDesdePOS(item: CatalogoItemPOS): InsumoMaster {
+  return {
+    id: `pos-${item.posItemId}`,
+    posItemId: item.posItemId,
+    nombre: item.nombre,
+    unidad: item.unidad,
+    categoria: item.grupo || "General",
+    subcategoria: item.subgrupo,
+    minimo: item.minimo,
+    maximo: item.maximo,
+  };
+}
+
+/** Botones de suma rápida según la unidad de inventario. */
+function valoresRapidos(unidad: string): number[] {
+  const u = unidad.trim().toLowerCase();
+  if (["g", "gr", "grs", "gramos", "ml"].includes(u)) return [100, 250, 500, 1000];
+  if (["kg", "l", "lt", "lts", "litro", "litros"].includes(u)) return [0.5, 1, 2, 5];
+  return [1, 5, 10, 25];
+}
+
+const formatoCantidad = (n: number | undefined) => (n ? n.toLocaleString("es-CO", { maximumFractionDigits: 2 }) : "—");
 
 const DEFAULT_INSUMOS: InsumoMaster[] = [
   { id: "ins-1", nombre: "Harina de Trigo", unidad: "g", categoria: "Materia Prima" },
@@ -60,7 +142,6 @@ const DEFAULT_INSUMOS: InsumoMaster[] = [
 ];
 
 const LOCAL_STORAGE_CATALOG_KEY = "lopez_gracia_inventory_master";
-const LOCAL_STORAGE_RECORDS_KEY = "lopez_gracia_inventory_closures";
 
 interface InventoryClosureProps {
   username: string;
@@ -80,10 +161,10 @@ export default function InventoryClosure({
   const [records, setRecords] = useState<InventoryClosureRecord[]>([]);
 
   // Navigation tab inside Inventory module
-  const [activeTab, setActiveTab] = useState<"new" | "history" | "catalog">("new");
+  const [activeTab, setActiveTab] = useState<PestanaInventario>("new");
 
   // Form state for active count
-  const [fecha, setFecha] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [fecha, setFecha] = useState<string>(() => todayBogota());
   const [itemsState, setItemsState] = useState<InsumoCountItem[]>([]);
   const [observaciones, setObservaciones] = useState<string>("");
   const [filterCategory, setFilterCategory] = useState<string>("todos");
@@ -99,95 +180,196 @@ export default function InventoryClosure({
   const [historySearch, setHistorySearch] = useState("");
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
 
-  // Load master catalog and records on mount
-  useEffect(() => {
-    loadMasterCatalog();
-    loadHistoryRecords();
-  }, []);
+  const [loadError, setLoadError] = useState("");
+  const [catalogoError, setCatalogoError] = useState("");
 
-  const loadMasterCatalog = () => {
+  // Catálogo: el de IntuiPOS si el local lo tiene configurado; si no, el manual de siempre.
+  const [fuenteCatalogo, setFuenteCatalogo] = useState<FuenteCatalogo>("cargando");
+  const [bodegaPOS, setBodegaPOS] = useState<BodegaPOS | null>(null);
+  const [sincronizando, setSincronizando] = useState(false);
+  const [sincronizadoEn, setSincronizadoEn] = useState<Date | null>(null);
+  const [posError, setPosError] = useState("");
+  const consultaCatalogo = useRef(0);
+  const consultaHistorial = useRef(0);
+  // Conteos en pantalla al momento de cambiar de catálogo (el cambio llega tras un await).
+  const itemsRef = useRef<InsumoCountItem[]>([]);
+  itemsRef.current = itemsState;
+
+  /** Pide confirmación si el catálogo nuevo no incluye insumos que ya tienen conteo escrito. */
+  const confirmarCambioCatalogo = (nuevo: InsumoMaster[]) => {
+    const ids = new Set(nuevo.map(c => c.id));
+    const perdidos = itemsRef.current.filter(i => i.rawExpression.trim() !== "" && !ids.has(i.insumoId));
+    if (perdidos.length === 0) return true;
+    const nombres = perdidos.slice(0, 5).map(i => i.nombre).join(", ") + (perdidos.length > 5 ? "…" : "");
+    return confirm(
+      `El catálogo actualizado no incluye ${perdidos.length} insumo(s) que ya contaste (${nombres}). ` +
+      "Si continúas, esos conteos se borran. ¿Continuar?"
+    );
+  };
+
+  // Load catalog and records on mount (y si cambia el local)
+  useEffect(() => {
+    cargarCatalogo(true);
+    loadHistoryRecords();
+  }, [localName]);
+
+  const cargarCatalogo = async (inicial: boolean) => {
+    const id = ++consultaCatalogo.current;
+    const vigente = () => id === consultaCatalogo.current;
+    // En la carga inicial no hay conteos; al actualizar o reintentar se avisa antes de borrarlos.
+    const aceptar = inicial ? () => true : confirmarCambioCatalogo;
+    const conservar = "Se mantiene el catálogo actual para no borrar los conteos ya escritos. Guarda el conteo y vuelve a intentarlo.";
+    if (inicial) setFuenteCatalogo("cargando");
+    setSincronizando(true);
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_CATALOG_KEY);
-      if (saved) {
-        setCatalog(JSON.parse(saved));
-      } else {
-        localStorage.setItem(LOCAL_STORAGE_CATALOG_KEY, JSON.stringify(DEFAULT_INSUMOS));
-        setCatalog(DEFAULT_INSUMOS);
+      const resp = await inventarioPosAdapter.getCatalogo(localName);
+      if (!vigente()) return;
+      if (resp.configurado) {
+        const nuevo = resp.items.map(insumoDesdePOS);
+        // IntuiPOS a veces responde null (lista vacía): no reemplazar un catálogo del POS que sí tenía insumos.
+        if (!inicial && nuevo.length === 0 && fuenteCatalogo === "pos" && catalog.length > 0) {
+          setPosError("IntuiPOS devolvió el catálogo vacío. Se mantiene la última versión.");
+          return;
+        }
+        if (!aceptar(nuevo)) {
+          setPosError(conservar);
+          return;
+        }
+        setCatalog(nuevo);
+        setBodegaPOS(resp.bodega);
+        setFuenteCatalogo("pos");
+        setSincronizadoEn(new Date());
+        setPosError("");
+        setCatalogoError("");
+        return;
       }
-    } catch (e) {
-      console.error("Error loading master catalog:", e);
+      setPosError("");
+    } catch (e: any) {
+      if (!vigente()) return;
+      console.error("Error sincronizando catálogo con IntuiPOS:", e);
+      // Si ya había catálogo del POS se conserva; en la carga inicial se pasa al manual.
+      if (!inicial && fuenteCatalogo === "pos") {
+        setPosError(`No se pudo actualizar el catálogo desde IntuiPOS: ${e?.message || "error"}. Se mantiene la última versión.`);
+        return;
+      }
+      setPosError(`No se pudo consultar el catálogo de IntuiPOS: ${e?.message || "error"}. Se usa el catálogo manual.`);
+    } finally {
+      if (vigente()) setSincronizando(false);
+    }
+    // El modo manual se activa cuando su catálogo ya llegó: así el editor nunca guarda sobre una lista vacía.
+    const aplicado = await loadMasterCatalog(vigente, aceptar);
+    if (!vigente()) return;
+    if (!aplicado) {
+      setPosError(conservar);
+      return;
+    }
+    setBodegaPOS(null);
+    setSincronizadoEn(null);
+    setFuenteCatalogo("manual");
+  };
+
+  /** Carga el catálogo manual. Devuelve false si no se aplicó (consulta vieja o `aceptar` lo rechazó). */
+  const loadMasterCatalog = async (
+    vigente: () => boolean = () => true,
+    aceptar: (nuevo: InsumoMaster[]) => boolean = () => true,
+  ): Promise<boolean> => {
+    try {
+      const remote = await operacionAdapter.getCatalogoInventario<InsumoMaster>();
+      if (!vigente()) return false;
+      if (remote && remote.length > 0) {
+        if (!aceptar(remote)) return false;
+        setCatalog(remote);
+        setCatalogoError("");
+        return true;
+      }
+      // Primera vez: usar el catálogo que tenía este navegador (o el por defecto) como semilla.
+      let seed = DEFAULT_INSUMOS;
+      try {
+        const saved = localStorage.getItem(LOCAL_STORAGE_CATALOG_KEY);
+        if (saved) seed = JSON.parse(saved);
+      } catch { /* sin catálogo local */ }
+      if (!aceptar(seed)) return false;
+      setCatalog(seed);
+      setCatalogoError("");
+      await operacionAdapter.saveCatalogoInventario(seed).catch(() => undefined);
+      return true;
+    } catch (e: any) {
+      if (!vigente()) return false;
+      console.error("Error cargando catálogo de insumos:", e);
+      if (!aceptar(DEFAULT_INSUMOS)) return false;
       setCatalog(DEFAULT_INSUMOS);
+      setCatalogoError(`No se pudo cargar el catálogo del servidor: ${e?.message || "error"}`);
+      return true;
     }
   };
 
-  const loadHistoryRecords = () => {
+  const loadHistoryRecords = async () => {
+    const id = ++consultaHistorial.current;
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_RECORDS_KEY);
-      if (saved) {
-        setRecords(JSON.parse(saved));
-      } else {
-        setRecords([]);
+      const data = await operacionAdapter.getRegistros<InventoryClosureRecord>("inventario", localName);
+      if (id === consultaHistorial.current) {
+        setRecords(data);
+        setLoadError("");
       }
-    } catch (e) {
-      console.error("Error loading inventory records:", e);
+    } catch (e: any) {
+      console.error("Error cargando inventarios:", e);
+      if (id === consultaHistorial.current) {
+        setLoadError(`No se pudo cargar el historial de inventarios: ${e?.message || "error"}`);
+      }
     }
+  };
+
+  const persistCatalog = async (updated: InsumoMaster[], previous: InsumoMaster[]) => {
+    setCatalog(updated);
+    try {
+      await operacionAdapter.saveCatalogoInventario(updated);
+    } catch (e: any) {
+      setCatalog(previous);
+      alert(`No se pudo guardar el catálogo: ${e?.message || "error"}`);
+      return false;
+    }
+    return true;
   };
 
   // Sync count state when catalog changes or on initial setup
+  // (los conteos en curso se conservan porque el id del insumo POS es estable: "pos-<id>")
   useEffect(() => {
-    if (catalog.length > 0) {
-      setItemsState(prev => {
-        return catalog.map(catItem => {
-          const existing = prev.find(p => p.insumoId === catItem.id);
-          if (existing) {
-            return {
-              ...existing,
-              nombre: catItem.nombre,
-              unidad: catItem.unidad,
-            };
-          }
+    setItemsState(prev => {
+      return catalog.map(catItem => {
+        const existing = prev.find(p => p.insumoId === catItem.id);
+        if (existing) {
           return {
-            insumoId: catItem.id,
+            ...existing,
             nombre: catItem.nombre,
             unidad: catItem.unidad,
-            selected: true,
-            entries: [],
-            rawExpression: "",
-            total: 0,
-            notas: ""
+            posItemId: catItem.posItemId,
+            subcategoria: catItem.subcategoria,
           };
-        });
+        }
+        return {
+          insumoId: catItem.id,
+          nombre: catItem.nombre,
+          unidad: catItem.unidad,
+          selected: true,
+          entries: [],
+          rawExpression: "",
+          total: 0,
+          notas: "",
+          posItemId: catItem.posItemId,
+          subcategoria: catItem.subcategoria,
+        };
       });
-    }
+    });
   }, [catalog]);
 
-  // Helper to safely parse and calculate expressions like "340 + 250 + 300"
-  const calculateExpression = (raw: string): number => {
-    if (!raw.trim()) return 0;
-    // Remueve caracteres no numéricos excepto operadores + y . y ,
-    const cleaned = raw.replace(/,/g, ".").replace(/[^0-9+.]/g, "");
-    if (!cleaned) return 0;
-
-    const parts = cleaned.split("+");
-    let sum = 0;
-    for (const part of parts) {
-      const num = parseFloat(part.trim());
-      if (!isNaN(num)) {
-        sum += num;
-      }
-    }
-    return Math.round(sum * 100) / 100;
-  };
-
-  // Handle expression change
+  // Handle expression change ("340 + 250 + 300"; coma decimal y punto de miles, como se ve en pantalla)
   const handleExpressionChange = (insumoId: string, value: string) => {
-    const total = calculateExpression(value);
     setItemsState(prev => prev.map(item => {
       if (item.insumoId === insumoId) {
         return {
           ...item,
           rawExpression: value,
-          total: total
+          total: calcularExpresionConteo(value, item.unidad)
         };
       }
       return item;
@@ -210,7 +392,7 @@ export default function InventoryClosure({
     setItemsState(prev => prev.map(item => {
       if (item.insumoId === insumoId) {
         const newRaw = item.rawExpression ? `${item.rawExpression} + ${val}` : `${val}`;
-        const total = calculateExpression(newRaw);
+        const total = calcularExpresionConteo(newRaw, item.unidad);
         return {
           ...item,
           rawExpression: newRaw,
@@ -222,7 +404,7 @@ export default function InventoryClosure({
   };
 
   // Add new item to Master Catalog
-  const handleCreateInsumo = (e: React.FormEvent) => {
+  const handleCreateInsumo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newInsumoNombre.trim()) return;
 
@@ -233,9 +415,7 @@ export default function InventoryClosure({
       categoria: newInsumoCategoria
     };
 
-    const updatedCatalog = [...catalog, newItem];
-    setCatalog(updatedCatalog);
-    localStorage.setItem(LOCAL_STORAGE_CATALOG_KEY, JSON.stringify(updatedCatalog));
+    if (!(await persistCatalog([...catalog, newItem], catalog))) return;
 
     setNewInsumoNombre("");
     setNewInsumoUnidad("g");
@@ -244,15 +424,15 @@ export default function InventoryClosure({
   };
 
   // Remove insumo from master catalog
-  const handleDeleteInsumoFromCatalog = (id: string, nombre: string) => {
+  const handleDeleteInsumoFromCatalog = async (id: string, nombre: string) => {
     if (!confirm(`¿Eliminar el insumo "${nombre}" del catálogo maestro?`)) return;
-    const updated = catalog.filter(c => c.id !== id);
-    setCatalog(updated);
-    localStorage.setItem(LOCAL_STORAGE_CATALOG_KEY, JSON.stringify(updated));
+    await persistCatalog(catalog.filter(c => c.id !== id), catalog);
   };
 
   // Save Inventory Closure
-  const handleSubmitClosure = (e: React.FormEvent) => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSubmitClosure = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const selectedItems = itemsState.filter(i => i.selected && i.total > 0);
@@ -279,13 +459,24 @@ export default function InventoryClosure({
         entries: i.entries,
         rawExpression: i.rawExpression,
         total: i.total,
-        notas: i.notas
-      }))
+        notas: i.notas,
+        ...(i.posItemId !== undefined ? { posItemId: i.posItemId, subcategoria: i.subcategoria } : {})
+      })),
+      fuenteCatalogo: fuenteCatalogo === "pos" ? "pos" : "manual",
+      ...(fuenteCatalogo === "pos" && bodegaPOS ? { bodegaPOS } : {})
     };
 
-    const updatedRecords = [newRecord, ...records];
-    setRecords(updatedRecords);
-    localStorage.setItem(LOCAL_STORAGE_RECORDS_KEY, JSON.stringify(updatedRecords));
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      const saved = await operacionAdapter.saveRegistro("inventario", newRecord, localName);
+      setRecords(prev => [saved, ...prev]);
+    } catch (err: any) {
+      alert(`No se pudo guardar el inventario: ${err?.message || "error"}. Tus conteos siguen en pantalla; intenta de nuevo.`);
+      return;
+    } finally {
+      setIsSaving(false);
+    }
 
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 4000);
@@ -302,22 +493,59 @@ export default function InventoryClosure({
 
   // Filtered categories
   const categories = ["todos", ...Array.from(new Set(catalog.map(c => c.categoria)))];
+  // Al cambiar de catálogo la categoría elegida puede dejar de existir.
+  const categoriaActiva = categories.includes(filterCategory) ? filterCategory : "todos";
+  const esPOS = fuenteCatalogo === "pos";
+  const busqueda = normalizarNombre(searchTerm);
 
   const filteredItemsToCount = itemsState.filter(item => {
     const catMatch = catalog.find(c => c.id === item.insumoId);
-    if (filterCategory !== "todos" && catMatch?.categoria !== filterCategory) {
+    if (categoriaActiva !== "todos" && catMatch?.categoria !== categoriaActiva) {
       return false;
     }
-    if (searchTerm.trim() && !item.nombre.toLowerCase().includes(searchTerm.toLowerCase())) {
+    if (busqueda && !normalizarNombre(item.nombre).includes(busqueda)) {
       return false;
     }
     return true;
   });
 
+  const tabClass = (tab: PestanaInventario) =>
+    `px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer ${
+      activeTab === tab ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
+    }`;
+
+  const cargandoVista = (
+    <div
+      aria-busy="true"
+      className="bg-white border border-slate-200/80 rounded-2xl p-8 text-center text-xs font-bold text-slate-500 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)]"
+    >
+      Cargando…
+    </div>
+  );
+
   return (
     <div className="space-y-6">
+      {catalogoError && (
+        <div role="alert" className="bg-red-50 border border-red-200 text-red-800 text-sm font-bold p-3 rounded-xl">{catalogoError}</div>
+      )}
+      {loadError && (
+        <div role="alert" className="bg-red-50 border border-red-200 text-red-800 text-sm font-bold p-3 rounded-xl">{loadError}</div>
+      )}
+      {posError && (
+        <div role="alert" className="bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold p-3 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <span>{posError}</span>
+          <button
+            type="button"
+            onClick={() => cargarCatalogo(false)}
+            disabled={sincronizando}
+            className="px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-100 disabled:opacity-60 rounded-lg text-xs font-bold text-amber-900 cursor-pointer shrink-0"
+          >
+            {sincronizando ? "Reintentando…" : "Reintentar"}
+          </button>
+        </div>
+      )}
       {/* Header Bar */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2.5">
             <div className="w-9 h-9 rounded-xl bg-emerald-50 text-[#1E3E30] flex items-center justify-center">
@@ -333,37 +561,35 @@ export default function InventoryClosure({
         </div>
 
         {/* Sub-tab switcher */}
-        <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
-          <button
-            type="button"
-            onClick={() => setActiveTab("new")}
-            className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer ${
-              activeTab === "new" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
+        <div className="flex flex-wrap bg-slate-100 p-1 rounded-xl gap-1">
+          <button type="button" aria-pressed={activeTab === "new"} onClick={() => setActiveTab("new")} className={tabClass("new")}>
             <Calculator className="w-3.5 h-3.5" />
             <span>Nuevo Conteo</span>
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("history")}
-            className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer ${
-              activeTab === "history" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
+          <button type="button" aria-pressed={activeTab === "history"} onClick={() => setActiveTab("history")} className={tabClass("history")}>
             <History className="w-3.5 h-3.5" />
             <span>Historial ({records.length})</span>
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("catalog")}
-            className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer ${
-              activeTab === "catalog" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
+          <button type="button" aria-pressed={activeTab === "catalog"} onClick={() => setActiveTab("catalog")} className={tabClass("catalog")}>
             <Package className="w-3.5 h-3.5" />
             <span>Catálogo Insumos</span>
           </button>
+          {isManagerView && (
+            <>
+              <button type="button" aria-pressed={activeTab === "existencias"} onClick={() => setActiveTab("existencias")} className={tabClass("existencias")}>
+                <Boxes className="w-3.5 h-3.5" />
+                <span>Existencias POS</span>
+              </button>
+              <button type="button" aria-pressed={activeTab === "movimientos"} onClick={() => setActiveTab("movimientos")} className={tabClass("movimientos")}>
+                <ArrowLeftRight className="w-3.5 h-3.5" />
+                <span>Movimientos POS</span>
+              </button>
+              <button type="button" aria-pressed={activeTab === "costo"} onClick={() => setActiveTab("costo")} className={tabClass("costo")}>
+                <Receipt className="w-3.5 h-3.5" />
+                <span>Costo de ventas</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -383,6 +609,31 @@ export default function InventoryClosure({
       {/* TAB 1: NUEVO CONTEO */}
       {activeTab === "new" && (
         <form onSubmit={handleSubmitClosure} className="space-y-6">
+          {esPOS && (
+            <div className="bg-emerald-50/60 border border-emerald-200 rounded-2xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-bold text-[#1E3E30]">
+                <Link2 className="w-4 h-4 shrink-0" />
+                <span>
+                  Catálogo sincronizado con IntuiPOS · {bodegaPOS?.nombre || "Bodega del local"} · {catalog.length} insumos
+                  {sincronizadoEn && (
+                    <span className="font-medium text-emerald-700/80">
+                      {" "}· {sincronizadoEn.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  )}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => cargarCatalogo(false)}
+                disabled={sincronizando}
+                className="px-3 py-1.5 bg-white border border-emerald-200 hover:bg-emerald-100 disabled:opacity-60 rounded-lg text-xs font-bold text-[#1E3E30] flex items-center justify-center gap-1.5 cursor-pointer disabled:cursor-wait shrink-0"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${sincronizando ? "animate-spin" : ""}`} />
+                <span>{sincronizando ? "Actualizando…" : "Actualizar"}</span>
+              </button>
+            </div>
+          )}
+
           <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
@@ -433,7 +684,7 @@ export default function InventoryClosure({
               <div className="flex items-center space-x-2">
                 <span className="text-xs font-bold text-slate-500">Categoría:</span>
                 <select
-                  value={filterCategory}
+                  value={categoriaActiva}
                   onChange={(e) => setFilterCategory(e.target.value)}
                   className="bg-slate-50/50 hover:bg-white focus:bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-800 outline-none cursor-pointer"
                 >
@@ -459,10 +710,16 @@ export default function InventoryClosure({
               </span>
             </div>
 
-            <div className="space-y-2.5">
-              {filteredItemsToCount.length === 0 ? (
+            <div className="space-y-2.5" aria-busy={fuenteCatalogo === "cargando"}>
+              {fuenteCatalogo === "cargando" ? (
+                <div className="text-center py-8 bg-slate-50 border border-dashed border-slate-200 rounded-xl text-xs text-slate-500 font-bold">
+                  Cargando catálogo de insumos…
+                </div>
+              ) : filteredItemsToCount.length === 0 ? (
                 <div className="text-center py-8 bg-slate-50 border border-dashed border-slate-200 rounded-xl text-xs text-slate-400 font-medium">
-                  No hay insumos que coincidan con la búsqueda. Puedes agregar insumos en la pestaña "Catálogo Insumos".
+                  {esPOS
+                    ? "No hay insumos que coincidan con la búsqueda."
+                    : "No hay insumos que coincidan con la búsqueda. Puedes agregar insumos en la pestaña \"Catálogo Insumos\"."}
                 </div>
               ) : (
                 filteredItemsToCount.map((item) => {
@@ -489,10 +746,15 @@ export default function InventoryClosure({
                             <span className="font-bold text-sm text-slate-900 block">
                               {item.nombre}
                             </span>
-                            <div className="flex items-center space-x-2 mt-0.5">
-                              <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
+                              <span className="text-[11px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md">
                                 {masterInfo?.categoria || "General"}
                               </span>
+                              {masterInfo?.subcategoria && (
+                                <span className="text-[11px] font-bold px-2 py-0.5 bg-emerald-50 text-[#1E3E30] border border-emerald-100 rounded-md">
+                                  {masterInfo.subcategoria}
+                                </span>
+                              )}
                               <span className="text-xs text-slate-400 font-numeric font-medium">
                                 Unidad: {item.unidad}
                               </span>
@@ -516,22 +778,22 @@ export default function InventoryClosure({
 
                             {/* Quick add buttons */}
                             <div className="flex items-center space-x-1 shrink-0">
-                              {[100, 250, 500, 1000].map(val => (
+                              {valoresRapidos(item.unidad).map(val => (
                                 <button
                                   key={val}
                                   type="button"
                                   onClick={() => handleAddEntryValue(item.insumoId, val)}
                                   className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-xs font-bold font-numeric text-slate-700 transition-colors cursor-pointer"
-                                  title={`Añadir +${val} ${item.unidad}`}
+                                  title={`Añadir +${val.toLocaleString("es-CO")} ${item.unidad}`}
                                 >
-                                  +{val}
+                                  +{val.toLocaleString("es-CO")}
                                 </button>
                               ))}
                             </div>
 
                             {/* Total Display */}
                             <div className="bg-slate-900 text-white px-3.5 py-2 rounded-xl text-right shrink-0 min-w-[120px]">
-                              <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase block">
+                              <span className="text-[11px] font-bold tracking-wider text-slate-400 uppercase block">
                                 Total Calculado
                               </span>
                               <span className="text-sm font-extrabold font-numeric">
@@ -566,7 +828,8 @@ export default function InventoryClosure({
           <div className="flex justify-end pt-2">
             <button
               type="submit"
-              className="px-6 py-3 bg-[#1E3E30] text-white hover:bg-[#163025] font-bold text-xs rounded-xl flex items-center space-x-2 shadow-xs transition-all cursor-pointer"
+              disabled={fuenteCatalogo === "cargando" || isSaving}
+              className="px-6 py-3 bg-[#1E3E30] text-white hover:bg-[#163025] disabled:opacity-60 disabled:cursor-not-allowed font-bold text-xs rounded-xl flex items-center space-x-2 shadow-xs transition-all cursor-pointer"
             >
               <Save className="w-4 h-4" />
               <span>Guardar Cierre de Inventario</span>
@@ -610,14 +873,24 @@ export default function InventoryClosure({
                 )
                 .map((record) => {
                   const isExpanded = expandedRecordId === record.id;
+                  const alternar = () => setExpandedRecordId(isExpanded ? null : record.id);
                   return (
-                    <div 
+                    <div
                       key={record.id}
                       className="border border-slate-200/80 rounded-xl bg-white shadow-xs overflow-hidden"
                     >
-                      <div 
-                        onClick={() => setExpandedRecordId(isExpanded ? null : record.id)}
-                        className="p-4 bg-slate-50/50 flex flex-col sm:flex-row justify-between sm:items-center gap-2 cursor-pointer hover:bg-slate-50 transition-colors"
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={isExpanded}
+                        onClick={alternar}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            alternar();
+                          }
+                        }}
+                        className="p-4 bg-slate-50/50 flex flex-col sm:flex-row justify-between sm:items-center gap-2 cursor-pointer hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E3E30]/30 transition-colors"
                       >
                         <div className="flex items-center space-x-3">
                           <span className="font-bold text-xs text-slate-900 bg-white px-2.5 py-1 rounded-lg border border-slate-200 font-numeric">
@@ -629,6 +902,7 @@ export default function InventoryClosure({
                             </span>
                             <span className="text-[11px] text-slate-500 font-medium">
                               Local: {record.local} • {record.totalItemsCounted} Insumos Registrados
+                              {record.fuenteCatalogo === "pos" && " • Catálogo IntuiPOS"}
                             </span>
                           </div>
                         </div>
@@ -637,9 +911,9 @@ export default function InventoryClosure({
                           <span className="text-xs font-numeric text-slate-400">
                             {new Date(record.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
-                          <button className="p-1 rounded-lg hover:bg-slate-200 text-slate-500">
+                          <span aria-hidden="true" className="p-1 rounded-lg hover:bg-slate-200 text-slate-500">
                             {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                          </button>
+                          </span>
                         </div>
                       </div>
 
@@ -674,6 +948,8 @@ export default function InventoryClosure({
                               </tbody>
                             </table>
                           </div>
+
+                          {isManagerView && <CuadrePOS localName={localName} record={record} />}
                         </div>
                       )}
                     </div>
@@ -685,7 +961,75 @@ export default function InventoryClosure({
       )}
 
       {/* TAB 3: CATÁLOGO DE INSUMOS */}
-      {activeTab === "catalog" && (
+      {activeTab === "catalog" && fuenteCatalogo === "cargando" && cargandoVista}
+
+      {activeTab === "catalog" && esPOS && (
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-900">
+                Catálogo de IntuiPOS ({catalog.length} Insumos)
+              </h3>
+              <p className="text-xs text-slate-500 font-medium mt-0.5 flex items-center gap-1.5">
+                <Link2 className="w-3.5 h-3.5 text-[#1E3E30]" />
+                <span>
+                  Los insumos se administran en IntuiPOS{bodegaPOS ? ` · ${bodegaPOS.nombre}` : ""}. Aquí son de solo lectura.
+                </span>
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => cargarCatalogo(false)}
+              disabled={sincronizando}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 disabled:opacity-60 rounded-lg text-xs font-bold text-slate-700 flex items-center justify-center gap-1.5 cursor-pointer disabled:cursor-wait shrink-0"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${sincronizando ? "animate-spin" : ""}`} />
+              <span>{sincronizando ? "Actualizando…" : "Actualizar"}</span>
+            </button>
+          </div>
+
+          <div className="border border-slate-200 rounded-xl overflow-hidden overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 font-bold text-xs text-slate-500">
+                  <th className="p-3">Insumo</th>
+                  <th className="p-3">Grupo</th>
+                  <th className="p-3">Subgrupo</th>
+                  <th className="p-3">Unidad</th>
+                  <th className="p-3 text-right">Mín.</th>
+                  <th className="p-3 text-right">Máx.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {catalog.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-4 text-center text-slate-400 font-medium">
+                      IntuiPOS no devolvió insumos para esta bodega.
+                    </td>
+                  </tr>
+                ) : (
+                  catalog.map(item => (
+                    <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50/60 font-medium">
+                      <td className="p-3 font-bold text-slate-900">{item.nombre}</td>
+                      <td className="p-3">
+                        <span className="px-2.5 py-0.5 bg-slate-100 text-slate-700 text-[11px] font-medium rounded-md">
+                          {item.categoria}
+                        </span>
+                      </td>
+                      <td className="p-3 text-slate-600">{item.subcategoria || "—"}</td>
+                      <td className="p-3 font-numeric text-slate-600">{item.unidad}</td>
+                      <td className="p-3 text-right font-numeric text-slate-600">{formatoCantidad(item.minimo)}</td>
+                      <td className="p-3 text-right font-numeric text-slate-600">{formatoCantidad(item.maximo)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "catalog" && fuenteCatalogo === "manual" && (
         <div className="space-y-6">
           {/* Form para agregar insumo al catálogo */}
           <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] space-y-4">
@@ -793,6 +1137,17 @@ export default function InventoryClosure({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Vistas de Gerencia con datos de IntuiPOS (cada una maneja el caso "no configurado") */}
+      {isManagerView && (activeTab === "existencias" || activeTab === "movimientos" || activeTab === "costo") && (
+        <LimiteErrorVista key={activeTab}>
+          <Suspense fallback={cargandoVista}>
+            {activeTab === "existencias" && <ExistenciasPOS localName={localName} />}
+            {activeTab === "movimientos" && <MovimientosPOS localName={localName} />}
+            {activeTab === "costo" && <CostoVentasPOS localName={localName} />}
+          </Suspense>
+        </LimiteErrorVista>
       )}
     </div>
   );

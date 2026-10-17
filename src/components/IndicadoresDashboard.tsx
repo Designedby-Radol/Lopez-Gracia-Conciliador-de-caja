@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
+import { operacionAdapter } from "../db/operacionAdapter";
+import { dbAdapter } from "../db/dbAdapter";
 import {
   TrendingUp,
   Package,
@@ -29,7 +31,8 @@ import {
   Info
 } from "lucide-react";
 import { CierreCaja } from "../types";
-import { jsPDF } from "jspdf";
+import { todayBogota } from "../lib/dates";
+import { loadJsPDF } from "../lib/lazyLibs";
 
 interface IndicadoresDashboardProps {
   cierres: CierreCaja[];
@@ -48,196 +51,43 @@ export default function IndicadoresDashboard({
   const [dateRange, setDateRange] = useState<"quincena" | "mes" | "todo">("mes");
   const [searchFilter, setSearchFilter] = useState("");
 
-  // Cargar datos de inventario guardados
-  const [inventoryRecords, setInventoryRecords] = useState<any[]>(() => {
-    try {
-      const saved = localStorage.getItem("lopez_gracia_inventory_records");
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error(e);
-    }
-    // Datos de ejemplo representativos si está vacío
-    return [
-      {
-        id: "inv-demo-1",
-        fecha: new Date(Date.now() - 86400000 * 1).toISOString().split("T")[0],
-        usuarioNombre: "Líder Operador (Acceso Rápido)",
-        totalItemsCounted: 10,
-        observacionesGenerales: "Inventario de cierre semanal completo. Sin novedades críticas.",
-        items: [
-          { nombre: "Harina de Trigo", total: 45000, unidad: "g", categoria: "Materia Prima" },
-          { nombre: "Mantequilla Sin Sal", total: 18500, unidad: "g", categoria: "Materia Prima" },
-          { nombre: "Azúcar Blanco", total: 22000, unidad: "g", categoria: "Materia Prima" },
-          { nombre: "Leche Entera", total: 32, unidad: "L", categoria: "Lácteos" },
-          { nombre: "Café en Grano Especial", total: 8500, unidad: "g", categoria: "Barismo" },
-          { nombre: "Huevos A/AA", total: 240, unidad: "uds", categoria: "Materia Prima" },
-          { nombre: "Chocolate 70%", total: 12000, unidad: "g", categoria: "Materia Prima" },
-          { nombre: "Crema de Leche", total: 14, unidad: "L", categoria: "Lácteos" },
-          { nombre: "Cajas Torta Individual", total: 180, unidad: "uds", categoria: "Empaques" },
-          { nombre: "Servilletas de Servicio", total: 25, unidad: "paquetes", categoria: "Insumos Varios" },
-        ]
-      },
-      {
-        id: "inv-demo-2",
-        fecha: new Date(Date.now() - 86400000 * 8).toISOString().split("T")[0],
-        usuarioNombre: "Líder Operador (Acceso Rápido)",
-        totalItemsCounted: 10,
-        observacionesGenerales: "Conteo físico quincenal de bodega y punto de venta.",
-        items: [
-          { nombre: "Harina de Trigo", total: 42000, unidad: "g", categoria: "Materia Prima" },
-          { nombre: "Mantequilla Sin Sal", total: 16000, unidad: "g", categoria: "Materia Prima" },
-          { nombre: "Azúcar Blanco", total: 19000, unidad: "g", categoria: "Materia Prima" },
-          { nombre: "Leche Entera", total: 28, unidad: "L", categoria: "Lácteos" },
-          { nombre: "Café en Grano Especial", total: 7200, unidad: "g", categoria: "Barismo" },
-          { nombre: "Huevos A/AA", total: 190, unidad: "uds", categoria: "Materia Prima" },
-          { nombre: "Chocolate 70%", total: 9500, unidad: "g", categoria: "Materia Prima" },
-          { nombre: "Crema de Leche", total: 11, unidad: "L", categoria: "Lácteos" },
-          { nombre: "Cajas Torta Individual", total: 140, unidad: "uds", categoria: "Empaques" },
-          { nombre: "Servilletas de Servicio", total: 20, unidad: "paquetes", categoria: "Insumos Varios" },
-        ]
-      }
-    ];
-  });
+  // Datos reales desde el servidor (antes: localStorage con datos de demostración)
+  const [inventoryRecords, setInventoryRecords] = useState<any[]>([]);
+  const [inventoryCatalogSize, setInventoryCatalogSize] = useState<number>(0);
+  const [checklistRecords, setChecklistRecords] = useState<any[]>([]);
+  const [attendanceData, setAttendanceData] = useState<any[]>([]);
+  const [dataError, setDataError] = useState("");
 
-  // Cargar datos de checklist operativo
-  const [checklistRecords, setChecklistRecords] = useState<any[]>(() => {
-    try {
-      const saved = localStorage.getItem("lopez_gracia_checklists");
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error(e);
-    }
-    return [
-      {
-        id: "chk-1",
-        fecha: new Date(Date.now() - 86400000 * 1).toISOString().split("T")[0],
-        turno: "completo",
-        usuarioNombre: "Líder Operador (Acceso Rápido)",
-        porcentajeCumplimiento: 96,
-        totalCumplidos: 24,
-        totalPendientes: 1,
-        observacionesGenerales: "Excelente alistamiento matutino y vitrina completa al 100%."
-      },
-      {
-        id: "chk-2",
-        fecha: new Date(Date.now() - 86400000 * 2).toISOString().split("T")[0],
-        turno: "mañana",
-        usuarioNombre: "Camila Rojas",
-        porcentajeCumplimiento: 92,
-        totalCumplidos: 23,
-        totalPendientes: 2,
-        observacionesGenerales: "Apertura puntual. Todo en orden sanitario."
-      },
-      {
-        id: "chk-3",
-        fecha: new Date(Date.now() - 86400000 * 3).toISOString().split("T")[0],
-        turno: "tarde",
-        usuarioNombre: "Juan David Pérez",
-        porcentajeCumplimiento: 100,
-        totalCumplidos: 25,
-        totalPendientes: 0,
-        observacionesGenerales: "Cierre impecable, pisos y máquinas desinfectadas."
-      }
-    ];
-  });
-
-  // Cargar registros de asistencia / llegadas tarde
-  const [attendanceData, setAttendanceData] = useState<any[]>(() => {
-    try {
-      const savedSalaries = localStorage.getItem("lopez_gracia_salaries_history");
-      if (savedSalaries) {
-        const parsed = JSON.parse(savedSalaries);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.allSettled([
+        operacionAdapter.getRegistros<any>("inventario", localName),
+        operacionAdapter.getCatalogoInventario<any>(),
+        operacionAdapter.getRegistros<any>("checklist", localName),
+        dbAdapter.getTurnosNomina(localName),
+      ]);
+      if (cancelled) return;
+      const [inv, cat, chk, nomina] = results;
+      if (inv.status === "fulfilled") setInventoryRecords(inv.value);
+      if (cat.status === "fulfilled") setInventoryCatalogSize(cat.value?.length || 0);
+      if (chk.status === "fulfilled") setChecklistRecords(chk.value);
+      if (nomina.status === "fulfilled") {
+        // Las marcaciones se guardan con cada liquidación de quincena.
         const extracted: any[] = [];
-        parsed.forEach((p: any) => {
-          if (p.desglose?.attendanceRecords) {
-            p.desglose.attendanceRecords.forEach((att: any) => {
-              extracted.push({
-                ...att,
-                empleadoNombre: p.empleadoNombre,
-                cargo: p.cargo || "Asistente de Servicio"
-              });
-            });
-          }
+        nomina.value.forEach((t: any) => {
+          (t.liquidacion?.attendanceRecords || []).forEach((att: any) => {
+            extracted.push({ ...att, empleadoNombre: t.nombre, cargo: t.cargo || "Asistente de Servicio" });
+          });
         });
-        if (extracted.length > 0) return extracted;
+        setAttendanceData(extracted);
       }
-    } catch (e) {
-      console.error(e);
-    }
-    // Datos realistas representativos para auditoría de llegadas tarde
-    return [
-      {
-        fecha: new Date(Date.now() - 86400000 * 1).toISOString().split("T")[0],
-        empleadoNombre: "Líder Operador (Acceso Rápido)",
-        cargo: "Líder operador",
-        horaIngresoProgramada: "12:00 PM",
-        horaIngreso: "12:00 PM",
-        minutosFaltantes: 0,
-        observacion: "Puntualidad exacta",
-        estado: "Puntual"
-      },
-      {
-        fecha: new Date(Date.now() - 86400000 * 1).toISOString().split("T")[0],
-        empleadoNombre: "Camila Rojas",
-        cargo: "Asistente de Servicio",
-        horaIngresoProgramada: "12:00 PM",
-        horaIngreso: "12:08 PM",
-        minutosFaltantes: 8,
-        observacion: "Llegada tarde de 8 min por trancón en Cra 7ma",
-        estado: "Tardanza"
-      },
-      {
-        fecha: new Date(Date.now() - 86400000 * 2).toISOString().split("T")[0],
-        empleadoNombre: "Valentina Gómez",
-        cargo: "Auxiliar de pastelería",
-        horaIngresoProgramada: "07:00 AM",
-        horaIngreso: "07:00 AM",
-        minutosFaltantes: 0,
-        observacion: "Puntualidad exacta al turno de pastelería",
-        estado: "Puntual"
-      },
-      {
-        fecha: new Date(Date.now() - 86400000 * 2).toISOString().split("T")[0],
-        empleadoNombre: "Juan David Pérez",
-        cargo: "Asistente de Servicio",
-        horaIngresoProgramada: "02:00 PM",
-        horaIngreso: "02:14 PM",
-        minutosFaltantes: 14,
-        observacion: "Llegada tarde de 14 min",
-        estado: "Tardanza"
-      },
-      {
-        fecha: new Date(Date.now() - 86400000 * 3).toISOString().split("T")[0],
-        empleadoNombre: "Camila Rojas",
-        cargo: "Asistente de Servicio",
-        horaIngresoProgramada: "12:00 PM",
-        horaIngreso: "12:00 PM",
-        minutosFaltantes: 0,
-        observacion: "Turno completo puntual",
-        estado: "Puntual"
-      },
-      {
-        fecha: new Date(Date.now() - 86400000 * 4).toISOString().split("T")[0],
-        empleadoNombre: "Ana María López",
-        cargo: "Líder de pastelería",
-        horaIngresoProgramada: "07:00 AM",
-        horaIngreso: "06:55 AM",
-        minutosFaltantes: 0,
-        observacion: "Llegada 5 min antes",
-        estado: "Puntual"
-      },
-      {
-        fecha: new Date(Date.now() - 86400000 * 5).toISOString().split("T")[0],
-        empleadoNombre: "Juan David Pérez",
-        cargo: "Asistente de Servicio",
-        horaIngresoProgramada: "02:00 PM",
-        horaIngreso: "02:00 PM",
-        minutosFaltantes: 0,
-        observacion: "Puntualidad exacta",
-        estado: "Puntual"
+      if (results.some(r => r.status === "rejected")) {
+        setDataError("Algunos indicadores no se pudieron cargar del servidor.");
       }
-    ];
-  });
+    })();
+    return () => { cancelled = true; };
+  }, [localName]);
 
   const formatCOP = (val: number) => {
     return new Intl.NumberFormat("es-CO", {
@@ -274,6 +124,7 @@ export default function IndicadoresDashboard({
     let totalTransferencias = 0;
     let totalPropinas = 0;
     let cierresCuadrados = 0;
+    let cierresAuditados = 0;
     let totalDesfaseAbs = 0;
 
     filteredCierres.forEach(c => {
@@ -282,18 +133,23 @@ export default function IndicadoresDashboard({
       totalJusto += Number(c.justoCierre || 0);
       totalRappi += Number(c.rappiCierre || 0);
       totalTransferencias += Number(c.transferenciasCierre || 0);
-      totalPropinas += Number(c.propinasTotal || c.propinasCierre || 0);
+      totalPropinas += Number(c.propinas || 0);
 
-      const difTotal = Math.abs(c.difTotal || (c.difEfectivo || 0) + (c.difTarjetas || 0) + (c.difJusto || 0) + (c.difRappi || 0) + (c.difTransferencias || 0));
-      totalDesfaseAbs += difTotal;
-      if (difTotal <= 500) {
-        cierresCuadrados += 1;
+      // Solo los cierres auditados tienen diferencias reales.
+      if (c.estado === "Cuadrado") {
+        cierresAuditados += 1;
+        const difTotal = Math.abs((c.difEfectivo || 0) + (c.difTarjetas || 0) + (c.difJusto || 0) + (c.difRappi || 0) + (c.difTransferencias || 0));
+        totalDesfaseAbs += difTotal;
+        if (difTotal <= 500) {
+          cierresCuadrados += 1;
+        }
       }
     });
 
     const totalVentas = totalEfectivo + totalDatafono + totalJusto + totalRappi + totalTransferencias;
-    const ticketPromedioEstimado = filteredCierres.length > 0 ? Math.round(totalVentas / (filteredCierres.length * 38)) : 28500;
-    const tasaCuadre = filteredCierres.length > 0 ? Math.round((cierresCuadrados / filteredCierres.length) * 100) : 100;
+    // Venta promedio por día con cierre (no hay número de transacciones para calcular ticket real)
+    const ticketPromedioEstimado = filteredCierres.length > 0 ? Math.round(totalVentas / filteredCierres.length) : 0;
+    const tasaCuadre = cierresAuditados > 0 ? Math.round((cierresCuadrados / cierresAuditados) * 100) : 0;
     const porcentajeMeta = metaVentas > 0 ? Math.min(Math.round((totalVentas / metaVentas) * 100), 100) : 100;
 
     return {
@@ -317,19 +173,24 @@ export default function IndicadoresDashboard({
   const inventarioMetrics = useMemo(() => {
     const totalRegistros = inventoryRecords.length;
     const ultimoRegistro = inventoryRecords[0];
-    const totalItemsCatalogados = 10;
-    const itemsContadosUltimo = ultimoRegistro?.totalItemsCounted || 10;
-    const coberturaConteo = Math.round((itemsContadosUltimo / totalItemsCatalogados) * 100);
+    const itemsContadosUltimo = ultimoRegistro?.totalItemsCounted || 0;
+    const coberturaConteo = inventoryCatalogSize > 0 ? Math.min(100, Math.round((itemsContadosUltimo / inventoryCatalogSize) * 100)) : 0;
 
-    // Mermas y rotación estimada
-    const alertasStock = [
-      { insumo: "Mantequilla Sin Sal", nivel: "Bajo (16 kg)", estado: "Alerta Reabastecer", categoria: "Materia Prima", urgencia: "media" },
-      { insumo: "Crema de Leche", nivel: "Crítico (11 L)", estado: "Pedido Urgente", categoria: "Lácteos", urgencia: "alta" },
-      { insumo: "Café en Grano Especial", nivel: "Óptimo (8.5 kg)", estado: "Normal", categoria: "Barismo", urgencia: "baja" },
-      { insumo: "Harina de Trigo", nivel: "Óptimo (45 kg)", estado: "Normal", categoria: "Materia Prima", urgencia: "baja" },
-      { insumo: "Huevos A/AA", nivel: "Normal (240 uds)", estado: "Normal", categoria: "Materia Prima", urgencia: "baja" },
-      { insumo: "Cajas Torta Individual", nivel: "Normal (180 uds)", estado: "Stock Seguro", categoria: "Empaques", urgencia: "baja" },
-    ];
+    // Sin niveles mínimos configurados no hay alertas reales: se muestra el último conteo.
+    const alertasStock = (ultimoRegistro?.items || [])
+      .filter((it: any) => it.selected !== false)
+      .map((it: any) => ({
+        insumo: it.nombre,
+        nivel: `${Number(it.total || 0).toLocaleString("es-CO")} ${it.unidad || ""}`.trim(),
+        estado: Number(it.total || 0) > 0 ? "Contado" : "En cero",
+        categoria: it.categoria || "—",
+        urgencia: Number(it.total || 0) > 0 ? "baja" : "alta",
+      }));
+
+    // Frecuencia de control: % de días con cierre de caja que también tienen conteo de inventario.
+    const diasConCierre = new Set(filteredCierres.map((c: any) => c.fecha));
+    const diasConConteo = new Set(inventoryRecords.map((r: any) => r.fecha).filter((f: string) => diasConCierre.has(f)));
+    const eficienciaControl = diasConCierre.size > 0 ? Math.round((diasConConteo.size / diasConCierre.size) * 100) : 0;
 
     return {
       totalRegistros,
@@ -337,34 +198,46 @@ export default function IndicadoresDashboard({
       ultimoRegistroFecha: ultimoRegistro?.fecha || "Sin fecha",
       ultimoAuditor: ultimoRegistro?.usuarioNombre || "Sin auditor",
       alertasStock,
-      eficienciaControl: 98
+      eficienciaControl
     };
-  }, [inventoryRecords]);
+  }, [inventoryRecords, inventoryCatalogSize, filteredCierres]);
 
   // CÁLCULOS SERVICIO
   const servicioMetrics = useMemo(() => {
     let sumCumplimiento = 0;
     let totalEvaluados = 0;
 
-    checklistRecords.forEach(c => {
-      sumCumplimiento += Number(c.porcentajeCumplimiento || 95);
-      totalEvaluados += 1;
-    });
+    // Cumplimiento por sección del checklist (apertura / turno / cierre)
+    const porSeccion: Record<string, { ok: number; total: number }> = {
+      apertura: { ok: 0, total: 0 }, turno: { ok: 0, total: 0 }, cierre: { ok: 0, total: 0 },
+    };
 
-    const promedioCumplimiento = totalEvaluados > 0 ? Math.round(sumCumplimiento / totalEvaluados) : 96;
-    const npsEstimado = 92; // Índice NPS de Experiencia del Cliente
-    const propinasPorCierrePromedio = filteredCierres.length > 0 
-      ? Math.round(ventasMetrics.totalPropinas / filteredCierres.length) 
-      : 35000;
+    checklistRecords.forEach(c => {
+      sumCumplimiento += Number(c.porcentajeCumplimiento || 0);
+      totalEvaluados += 1;
+      (c.tasks || []).forEach((t: any) => {
+        const sec = porSeccion[t.seccion];
+        if (!sec || t.estado === "no_aplica" || t.estado === "sin_evaluar") return;
+        sec.total += 1;
+        if (t.estado === "cumplido") sec.ok += 1;
+      });
+    });
+    const pctSeccion = (s: string) => porSeccion[s].total > 0 ? Math.round((porSeccion[s].ok / porSeccion[s].total) * 100) : 0;
+
+    const promedioCumplimiento = totalEvaluados > 0 ? Math.round(sumCumplimiento / totalEvaluados) : 0;
+    const npsEstimado = null as number | null; // No hay encuestas de clientes registradas
+    const propinasPorCierrePromedio = filteredCierres.length > 0
+      ? Math.round(ventasMetrics.totalPropinas / filteredCierres.length)
+      : 0;
 
     return {
       promedioCumplimiento,
       npsEstimado,
       totalChecklists: checklistRecords.length,
       propinasPorCierrePromedio,
-      estandaresLimpieza: 98,
-      estandaresExhibicion: 95,
-      estandaresAtencion: 96
+      estandaresLimpieza: pctSeccion("cierre"),
+      estandaresExhibicion: pctSeccion("apertura"),
+      estandaresAtencion: pctSeccion("turno")
     };
   }, [checklistRecords, filteredCierres, ventasMetrics.totalPropinas]);
 
@@ -420,8 +293,8 @@ export default function IndicadoresDashboard({
   }, [attendanceData, teamMembers]);
 
   // Exportar Resumen PDF de Indicadores
-  const exportIndicadoresPDF = () => {
-    const doc = new jsPDF();
+  const exportIndicadoresPDF = async () => {
+    const doc = new (await loadJsPDF())();
     const pageWidth = doc.internal.pageSize.width;
 
     // Header
@@ -468,7 +341,7 @@ export default function IndicadoresDashboard({
     y += 5;
     doc.text(`• Último Cierre de Inventario: ${inventarioMetrics.ultimoRegistroFecha} por ${inventarioMetrics.ultimoAuditor}`, 14, y);
     y += 5;
-    doc.text(`• Eficiencia de Control de Stock: ${inventarioMetrics.eficienciaControl}% (2 alertas preventivas activas)`, 14, y);
+    doc.text(`• Días con conteo de inventario: ${inventarioMetrics.eficienciaControl}% de los días con cierre`, 14, y);
     y += 10;
 
     // SECCIÓN 3: SERVICIO
@@ -481,7 +354,7 @@ export default function IndicadoresDashboard({
     doc.setFont("helvetica", "normal");
     doc.text(`• Cumplimiento de Checklist Operativo: ${servicioMetrics.promedioCumplimiento}% promedio`, 14, y);
     y += 5;
-    doc.text(`• Estándares de Limpieza: ${servicioMetrics.estandaresLimpieza}% | Exhibición: ${servicioMetrics.estandaresExhibicion}% | Atención: ${servicioMetrics.estandaresAtencion}%`, 14, y);
+    doc.text(`• Checklist Apertura: ${servicioMetrics.estandaresExhibicion}% | Turno: ${servicioMetrics.estandaresAtencion}% | Cierre: ${servicioMetrics.estandaresLimpieza}%`, 14, y);
     y += 5;
     doc.text(`• Promedio de Propinas por Cierre: ${formatCOP(servicioMetrics.propinasPorCierrePromedio)}`, 14, y);
     y += 10;
@@ -501,11 +374,14 @@ export default function IndicadoresDashboard({
     doc.text(`• Minutos Acumulados de Tardanza: ${llegadasMetrics.totalMinutosTardanza} minutos en el periodo evaluado`, 14, y);
     y += 10;
 
-    doc.save(`INFORME_INDICADORES_${localName.toUpperCase()}_${new Date().toISOString().split("T")[0]}.pdf`);
+    doc.save(`INFORME_INDICADORES_${localName.toUpperCase()}_${todayBogota()}.pdf`);
   };
 
   return (
     <div className="space-y-6 pb-12 animate-in fade-in duration-200">
+      {dataError && (
+        <div role="alert" className="bg-amber-50 border border-amber-300 text-amber-900 text-sm font-bold p-3 rounded-xl">{dataError}</div>
+      )}
       {/* HEADER SUPERIOR CON TITULO Y CONTROLES */}
       <div className="bg-white border-2 border-brand-ink p-5 md:p-6 shadow-[3px_3px_0px_0px_#1C1917] flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -584,7 +460,7 @@ export default function IndicadoresDashboard({
             <div className={`p-2 rounded-lg ${selectedSubTab === "inventario" ? "bg-white/10" : "bg-emerald-50 text-emerald-800"}`}>
               <Package className="w-5 h-5" />
             </div>
-            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+            <span className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${
               selectedSubTab === "inventario" ? "bg-white/20 text-white" : "bg-zinc-100 text-zinc-700"
             }`}>
               {inventarioMetrics.coberturaConteo}% Cobertura
@@ -611,7 +487,7 @@ export default function IndicadoresDashboard({
             <div className={`p-2 rounded-lg ${selectedSubTab === "ventas" ? "bg-white/10" : "bg-amber-50 text-amber-800"}`}>
               <DollarSign className="w-5 h-5" />
             </div>
-            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+            <span className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${
               selectedSubTab === "ventas" ? "bg-white/20 text-white" : "bg-amber-100 text-amber-900"
             }`}>
               {ventasMetrics.porcentajeMeta}% Meta
@@ -638,7 +514,7 @@ export default function IndicadoresDashboard({
             <div className={`p-2 rounded-lg ${selectedSubTab === "servicio" ? "bg-white/10" : "bg-purple-50 text-purple-800"}`}>
               <Award className="w-5 h-5" />
             </div>
-            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+            <span className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${
               selectedSubTab === "servicio" ? "bg-white/20 text-white" : "bg-purple-100 text-purple-900"
             }`}>
               {servicioMetrics.promedioCumplimiento}% Estándar
@@ -665,7 +541,7 @@ export default function IndicadoresDashboard({
             <div className={`p-2 rounded-lg ${selectedSubTab === "llegadas" ? "bg-white/10" : "bg-red-50 text-red-800"}`}>
               <Clock className="w-5 h-5" />
             </div>
-            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+            <span className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${
               selectedSubTab === "llegadas" ? "bg-white/20 text-white" : "bg-red-100 text-red-900"
             }`}>
               {llegadasMetrics.tasaPuntualidad}% Puntual
@@ -690,54 +566,54 @@ export default function IndicadoresDashboard({
           {/* Tarjetas Superiores de Inventario */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Cobertura Conteo
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-brand-ink">{inventarioMetrics.coberturaConteo}%</span>
                 <span className="text-xs font-bold text-emerald-700">10 / 10 Ítems</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Última auditoría: {inventarioMetrics.ultimoRegistroFecha}
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Alertas de Stock
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-amber-700">2</span>
                 <span className="text-xs font-bold text-amber-700">Atención preventiva</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Crema de Leche y Mantequilla
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Cierres Registrados
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-brand-ink">{inventarioMetrics.totalRegistros}</span>
                 <span className="text-xs font-bold text-brand-ink/70">Históricos</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Responsable: {inventarioMetrics.ultimoAuditor}
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Eficiencia de Control
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-emerald-700">{inventarioMetrics.eficienciaControl}%</span>
-                <span className="text-xs font-bold text-emerald-700">Bajo margen merma</span>
+                <span className="text-xs font-bold text-emerald-700">días con conteo</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
-                Estandarizado en sede {localName}
+              <span className="text-[11px] text-zinc-500 block mt-1">
+                Días con cierre que también tienen inventario ({localName})
               </span>
             </div>
           </div>
@@ -749,14 +625,14 @@ export default function IndicadoresDashboard({
                 <Package className="w-4 h-4 text-[#1E3E30]" />
                 <span>Monitoreo de Insumos Principales & Stock de Seguridad</span>
               </h3>
-              <span className="text-[10px] font-bold bg-white px-2 py-0.5 border border-brand-ink/30 rounded">
+              <span className="text-[11px] font-bold bg-white px-2 py-0.5 border border-brand-ink/30 rounded">
                 Catálogo Base López & Gracia
               </span>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-zinc-100/70 border-b border-brand-ink/20 text-brand-ink font-black uppercase text-[10px]">
+                <thead className="bg-zinc-100/70 border-b border-brand-ink/20 text-brand-ink font-black uppercase text-[11px]">
                   <tr>
                     <th className="py-2.5 px-4">Insumo</th>
                     <th className="py-2.5 px-4">Categoría</th>
@@ -772,7 +648,7 @@ export default function IndicadoresDashboard({
                       <td className="py-3 px-4 text-zinc-600">{item.categoria}</td>
                       <td className="py-3 px-4 font-mono font-bold">{item.nivel}</td>
                       <td className="py-3 px-4 text-center">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase ${
                           item.urgencia === "alta"
                             ? "bg-red-100 text-red-900 border border-red-300"
                             : item.urgencia === "media"
@@ -802,7 +678,7 @@ export default function IndicadoresDashboard({
           {/* Tarjetas Principales de Ventas */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Ventas Totales
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
@@ -816,27 +692,27 @@ export default function IndicadoresDashboard({
                   style={{ width: `${ventasMetrics.porcentajeMeta}%` }}
                 />
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 {ventasMetrics.porcentajeMeta}% de la meta ({formatCOP(metaVentas)})
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
-                Ticket Promedio
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
+                Venta Promedio por Día
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-xl md:text-2xl font-black font-mono text-brand-ink">
                   {formatCOP(ventasMetrics.ticketPromedioEstimado)}
                 </span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-2">
-                Promedio estimado por comensal
+              <span className="text-[11px] text-zinc-500 block mt-2">
+                Total de ventas ÷ días con cierre
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Propinas Recaudadas
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
@@ -844,13 +720,13 @@ export default function IndicadoresDashboard({
                   {formatCOP(ventasMetrics.totalPropinas)}
                 </span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-2">
+              <span className="text-[11px] text-zinc-500 block mt-2">
                 Para distribución por puntos
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Eficiencia de Cuadre
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
@@ -861,7 +737,7 @@ export default function IndicadoresDashboard({
                   {ventasMetrics.cierresCuadrados}/{ventasMetrics.totalCierres} Cierres
                 </span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-2">
+              <span className="text-[11px] text-zinc-500 block mt-2">
                 Cierres cuadrados sin faltantes
               </span>
             </div>
@@ -884,7 +760,7 @@ export default function IndicadoresDashboard({
                 <span className="text-base font-black font-mono block text-brand-ink">
                   {formatCOP(ventasMetrics.totalDatafono)}
                 </span>
-                <span className="text-[10px] text-zinc-500">
+                <span className="text-[11px] text-zinc-500">
                   {ventasMetrics.totalVentas > 0 ? Math.round((ventasMetrics.totalDatafono / ventasMetrics.totalVentas) * 100) : 0}% del total
                 </span>
               </div>
@@ -898,7 +774,7 @@ export default function IndicadoresDashboard({
                 <span className="text-base font-black font-mono block text-brand-ink">
                   {formatCOP(ventasMetrics.totalEfectivo)}
                 </span>
-                <span className="text-[10px] text-zinc-500">
+                <span className="text-[11px] text-zinc-500">
                   {ventasMetrics.totalVentas > 0 ? Math.round((ventasMetrics.totalEfectivo / ventasMetrics.totalVentas) * 100) : 0}% del total
                 </span>
               </div>
@@ -912,7 +788,7 @@ export default function IndicadoresDashboard({
                 <span className="text-base font-black font-mono block text-brand-ink">
                   {formatCOP(ventasMetrics.totalRappi)}
                 </span>
-                <span className="text-[10px] text-zinc-500">
+                <span className="text-[11px] text-zinc-500">
                   {ventasMetrics.totalVentas > 0 ? Math.round((ventasMetrics.totalRappi / ventasMetrics.totalVentas) * 100) : 0}% del total
                 </span>
               </div>
@@ -926,7 +802,7 @@ export default function IndicadoresDashboard({
                 <span className="text-base font-black font-mono block text-brand-ink">
                   {formatCOP(ventasMetrics.totalJusto)}
                 </span>
-                <span className="text-[10px] text-zinc-500">
+                <span className="text-[11px] text-zinc-500">
                   {ventasMetrics.totalVentas > 0 ? Math.round((ventasMetrics.totalJusto / ventasMetrics.totalVentas) * 100) : 0}% del total
                 </span>
               </div>
@@ -940,7 +816,7 @@ export default function IndicadoresDashboard({
                 <span className="text-base font-black font-mono block text-brand-ink">
                   {formatCOP(ventasMetrics.totalTransferencias)}
                 </span>
-                <span className="text-[10px] text-zinc-500">
+                <span className="text-[11px] text-zinc-500">
                   {ventasMetrics.totalVentas > 0 ? Math.round((ventasMetrics.totalTransferencias / ventasMetrics.totalVentas) * 100) : 0}% del total
                 </span>
               </div>
@@ -957,33 +833,33 @@ export default function IndicadoresDashboard({
           {/* Tarjetas Principales de Servicio */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Cumplimiento Checklist
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-brand-ink">{servicioMetrics.promedioCumplimiento}%</span>
                 <span className="text-xs font-bold text-emerald-700">Apertura & Cierre</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 {servicioMetrics.totalChecklists} inspecciones evaluadas
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Índice NPS Operativo
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
-                <span className="text-2xl font-black font-mono text-purple-800">{servicioMetrics.npsEstimado}/100</span>
-                <span className="text-xs font-bold text-purple-800">Calidad Superior</span>
+                <span className="text-2xl font-black font-mono text-purple-800">{servicioMetrics.npsEstimado ?? "N/D"}</span>
+                <span className="text-xs font-bold text-purple-800">Sin encuestas registradas</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Satisfacción en mesa y mostrador
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Propinas / Cierre
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
@@ -991,20 +867,20 @@ export default function IndicadoresDashboard({
                   {formatCOP(servicioMetrics.propinasPorCierrePromedio)}
                 </span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Reflejo de buena atención
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Bioseguridad & Limpieza
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-emerald-700">98%</span>
                 <span className="text-xs font-bold text-emerald-700">Estándar BPM</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Manipulación higiénica de alimentos
               </span>
             </div>
@@ -1020,7 +896,7 @@ export default function IndicadoresDashboard({
             <div className="space-y-4">
               <div>
                 <div className="flex justify-between text-xs font-bold mb-1">
-                  <span>Limpieza, Aseo y Desinfección de Salón y Baños</span>
+                  <span>Checklist de Cierre (limpieza, aseo y apagado)</span>
                   <span className="font-mono text-emerald-800">{servicioMetrics.estandaresLimpieza}%</span>
                 </div>
                 <div className="w-full bg-zinc-100 h-2.5 rounded-full overflow-hidden border border-zinc-200">
@@ -1030,7 +906,7 @@ export default function IndicadoresDashboard({
 
               <div>
                 <div className="flex justify-between text-xs font-bold mb-1">
-                  <span>Exhibición de Vitrina, Rotulación y Presentación de Pastelería</span>
+                  <span>Checklist de Apertura (vitrina, exhibición y montaje)</span>
                   <span className="font-mono text-emerald-800">{servicioMetrics.estandaresExhibicion}%</span>
                 </div>
                 <div className="w-full bg-zinc-100 h-2.5 rounded-full overflow-hidden border border-zinc-200">
@@ -1040,7 +916,7 @@ export default function IndicadoresDashboard({
 
               <div>
                 <div className="flex justify-between text-xs font-bold mb-1">
-                  <span>Calidad de Servicio, Rapidez de Barra y Atención al Cliente</span>
+                  <span>Checklist de Turno (servicio y atención)</span>
                   <span className="font-mono text-emerald-800">{servicioMetrics.estandaresAtencion}%</span>
                 </div>
                 <div className="w-full bg-zinc-100 h-2.5 rounded-full overflow-hidden border border-zinc-200">
@@ -1060,20 +936,20 @@ export default function IndicadoresDashboard({
           {/* Tarjetas Principales de Llegadas Tarde */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Tasa de Puntualidad
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-brand-ink">{llegadasMetrics.tasaPuntualidad}%</span>
                 <span className="text-xs font-bold text-emerald-700">A tiempo</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Basado en {llegadasMetrics.totalMarcaciones} turnos evaluados
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Llegadas Tarde Registradas
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
@@ -1082,13 +958,13 @@ export default function IndicadoresDashboard({
                 </span>
                 <span className="text-xs font-bold text-red-600">Eventos</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Conteo desde el minuto 1
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Minutos Acumulados
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
@@ -1096,19 +972,19 @@ export default function IndicadoresDashboard({
                   {llegadasMetrics.totalMinutosTardanza} min
                 </span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Tiempo faltante acumulado
               </span>
             </div>
 
             <div className="bg-white border-2 border-brand-ink p-4 rounded-xl shadow-[2px_2px_0px_0px_#1C1917]">
-              <span className="text-[10px] font-black uppercase text-brand-ink/60 tracking-wider block">
+              <span className="text-[11px] font-black uppercase text-brand-ink/60 tracking-wider block">
                 Estado Disciplinario
               </span>
               <div className="flex items-baseline space-x-2 mt-1">
                 <span className="text-2xl font-black font-mono text-emerald-700">Controlado</span>
               </div>
-              <span className="text-[10px] text-zinc-500 block mt-1">
+              <span className="text-[11px] text-zinc-500 block mt-1">
                 Sede {localName}
               </span>
             </div>
@@ -1121,14 +997,14 @@ export default function IndicadoresDashboard({
                 <Clock className="w-4 h-4 text-[#1E3E30]" />
                 <span>Consolidado de Puntualidad y Llegadas Tarde por Colaborador</span>
               </h3>
-              <span className="text-[10px] font-bold bg-white px-2 py-0.5 border border-brand-ink/30 rounded">
+              <span className="text-[11px] font-bold bg-white px-2 py-0.5 border border-brand-ink/30 rounded">
                 Reportes POS & Nómina
               </span>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-zinc-100/70 border-b border-brand-ink/20 text-brand-ink font-black uppercase text-[10px]">
+                <thead className="bg-zinc-100/70 border-b border-brand-ink/20 text-brand-ink font-black uppercase text-[11px]">
                   <tr>
                     <th className="py-2.5 px-4">Colaborador</th>
                     <th className="py-2.5 px-4">Cargo</th>
@@ -1160,7 +1036,7 @@ export default function IndicadoresDashboard({
                           {colab.minutos > 0 ? `${colab.minutos} min` : "0 min"}
                         </td>
                         <td className="py-3 px-4 text-right">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold font-mono ${
                             colabPuntualidad >= 95
                               ? "bg-emerald-100 text-emerald-900 border border-emerald-300"
                               : colabPuntualidad >= 80

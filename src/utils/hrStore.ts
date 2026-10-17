@@ -6,6 +6,7 @@ import {
   VacationPeriod,
   DailySchedule 
 } from "../types";
+import { todayBogota } from "../lib/dates";
 
 const HR_STORAGE_KEY = "lopez_gracia_hr_profiles_config_v2";
 
@@ -77,6 +78,14 @@ export const calculateVacationDaysAccrued = (fechaIngreso?: string): {
 
 class HRStore {
   private cache: Record<string, EmployeeSalaryConfig> = {};
+  /** SMMLV y auxilio de transporte vigentes (se cargan del servidor; ver setParametrosNomina). */
+  public smmlvBase = 1750905;
+  public auxTransporteBase = 249095;
+
+  public setParametrosNomina(smmlv: number, auxTransporte: number) {
+    if (smmlv > 0) this.smmlvBase = smmlv;
+    if (auxTransporte > 0) this.auxTransporteBase = auxTransporte;
+  }
   private isLoaded: boolean = false;
 
   constructor() {
@@ -109,6 +118,17 @@ class HRStore {
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.data) {
+          // Perfiles que solo existían en este navegador: subirlos una vez al servidor.
+          const soloLocales = Object.fromEntries(
+            Object.entries(this.cache).filter(([nombre]) => !(nombre in json.data))
+          );
+          if (Object.keys(soloLocales).length > 0) {
+            fetch("/api/db/hr-config", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(soloLocales)
+            }).catch(() => undefined);
+          }
           this.cache = { ...this.cache, ...json.data };
           this.saveToLocalStorage();
           this.isLoaded = true;
@@ -145,7 +165,7 @@ class HRStore {
 
   public getEmployeeConfig(member: any): EmployeeSalaryConfig {
     const nameClean = (member?.nombre || "").trim();
-    const smmlv = Number(localStorage.getItem("lopez_gracia_smmlv_base")) || 1750905;
+    const smmlv = this.smmlvBase;
     const role = member?.role || member?.cargo || "Asistente de Servicio";
     const isPasteleria = role.toLowerCase().includes("pasteler") || role.toLowerCase().includes("cocina");
 
@@ -180,7 +200,7 @@ class HRStore {
       sanciones: [],
       vacaciones: [],
       hrProfile: {
-        fechaIngreso: new Date().toISOString().split("T")[0],
+        fechaIngreso: todayBogota(),
         eps: "Compensar",
         arl: "SURA (Riesgo I)",
         fondoPensiones: "Porvenir",
@@ -201,7 +221,7 @@ class HRStore {
 
     // Validar auxilio de transporte
     if (updates.salarioBaseMensual !== undefined) {
-      const smmlv = Number(localStorage.getItem("lopez_gracia_smmlv_base")) || 1750905;
+      const smmlv = this.smmlvBase;
       updated.auxilioTransporteAplica = updates.salarioBaseMensual <= (smmlv * 2);
     }
 
